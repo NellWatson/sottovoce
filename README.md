@@ -185,4 +185,4 @@ The working approach is **inference-time gating** (probe decides what to show) c
 
 ## License
 
-Apache 2.0
+MIT

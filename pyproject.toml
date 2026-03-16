@@ -7,7 +7,7 @@ name = "sottovoce"
 version = "0.1.0"
 description = "Your model already knows when it's wrong. Sottovoce reads what it can't say."
 readme = "README.md"
-license = {text = "Apache-2.0"}
+license = {text = "MIT"}
 requires-python = ">=3.9"
 authors = [
     {name = "Nell Watson"},
@@ -17,7 +17,7 @@ keywords = ["ai-safety", "calibration", "confabulation", "hallucination", "langu
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
