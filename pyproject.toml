@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sottovoce"
+version = "0.1.0"
+description = "Your model already knows when it's wrong. Sottovoce reads what it can't say."
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Nell Watson"},
+    {name = "Claude Commons"},
+]
+keywords = ["ai-safety", "calibration", "confabulation", "hallucination", "language-models", "probes"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.1",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+train = [
+    "transformers>=4.40",
+    "datasets",
+    "scikit-learn",
+    "accelerate",
+]
+all = [
+    "sottovoce[train]",
+]
+
+[project.urls]
+Homepage = "https://github.com/nellwatson/sottovoce"
+Paper = "https://arxiv.org/abs/XXXX.XXXXX"
+
+[tool.setuptools.packages.find]
+where = ["src"]

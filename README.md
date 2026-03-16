@@ -1,0 +1,188 @@
+# sottovoce
+
+***sotto voce** (Italian): "under the voice" — spoken softly, intended to be heard only by those listening closely.*
+
+**Your model already knows when it's wrong. Sottovoce reads what it can't say.**
+
+A lightweight MLP probe reads a language model's internal representations at ~2/3 depth and predicts whether the model's answer is correct — before the answer is shown to the user. The probe transfers across model families via a simple linear projection trained on ~200 examples.
+
+> Watson & Claude (2026). *"The Model Already Knows: Universal Uncertainty Signals in Language Model Residual Streams."*
+
+## Key results
+
+| Metric | Value |
+|--------|-------|
+| Probe AUROC (same-model) | 0.836 |
+| Probe AUROC (confession protocol) | 0.870 |
+| Verbal self-report AUROC | 0.758 |
+| Cross-scale transfer gap (Qwen 3B → 32B) | 0.009 |
+| Cross-family transfer gap (Qwen 3B → Llama 8B) | 0.001 |
+| Combined DPO + probe: confident-wrong rate | 1.0% |
+| Combined DPO + probe: gate rate | 70.8% |
+
+## How it works
+
+1. **Hook** the residual stream at layer ⌊0.67 × n_layers⌋
+2. **Extract** the last-token hidden state (a single vector)
+3. **Score** it through a 2-layer MLP (256 hidden, ReLU, dropout 0.2)
+4. **Decide**: pass / hedge / gate / escalate based on configurable thresholds
+
+The probe reads uncertainty as the *negative space of certainty*: when the attention mechanism fails to retrieve confident content, the skip connection dominates, and the probe detects this dominance as a self-knowledge signal.
+
+## Installation
+
+```bash
+pip install sottovoce              # inference only
+pip install sottovoce[train]       # includes transformers, datasets, sklearn
+```
+
+## Quick start
+
+### Score a single response
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from sottovoce import CalibrationProbe
+
+model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
+
+probe = CalibrationProbe.from_pretrained("probes/qwen2.5-3b.pt")
+score = probe.score(model, tokenizer, "The capital of France is Paris.")
+decision = probe.decide(score)
+
+print(f"Confidence: {score:.3f} -> {decision.value}")
+# Confidence: 0.923 -> pass
+```
+
+### Cross-model transfer
+
+```python
+# Train on ~200 shared questions, then deploy
+probe = CalibrationProbe.from_pretrained("probes/qwen2.5-3b.pt")
+
+source_feats = probe.extract_features(qwen_model, qwen_tok, questions)
+target_feats = probe.extract_features(llama_model, llama_tok, questions)
+
+loss = probe.train_projection(source_feats, target_feats)
+probe.save_projection("probes/llama3-8b_projection.pt")
+
+# At inference time on Llama:
+probe.load_projection("probes/llama3-8b_projection.pt")
+score = probe.score(llama_model, llama_tok, text)
+```
+
+### Routing decisions
+
+```python
+from sottovoce import ProbeDecision
+
+decision = probe.decide(score)
+
+if decision == ProbeDecision.PASS:
+    return response                    # high confidence
+elif decision == ProbeDecision.HEDGE:
+    return response + "\n(I'm not fully certain about this.)"
+elif decision == ProbeDecision.GATE:
+    return "Let me look that up for you."   # retrieve or abstain
+else:  # ESCALATE
+    return escalate_to_human(query)
+```
+
+## Train your own probe
+
+```bash
+python -m sottovoce.train \
+    --model Qwen/Qwen2.5-3B-Instruct \
+    --dataset triviaqa \
+    --n-samples 2000 \
+    --output probes/my_probe.pt
+```
+
+See `sottovoce/train.py` for full options including:
+- `--layer-fraction` (default 0.67)
+- `--hidden-dim` (default 256)
+- `--epochs` (default 20)
+- `--val-split` (default 0.2)
+- `--quantize` for 4-bit inference on large models
+
+## API reference
+
+### `CalibrationProbe`
+
+| Method | Description |
+|--------|-------------|
+| `from_pretrained(path)` | Load probe weights from `.pt` file |
+| `score(model, tokenizer, text)` | Return confidence in [0, 1] |
+| `decide(score)` | Return `ProbeDecision` enum |
+| `extract_features(model, tokenizer, texts)` | Extract residual stream features |
+| `train_projection(source, target)` | Train linear cross-model projection |
+| `load_projection(path)` | Load saved projection |
+| `save(path)` / `save_projection(path)` | Save weights |
+
+### `ProbeConfig`
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `probe_layer_fraction` | 0.67 | Fraction of model depth to probe |
+| `threshold_pass` | 0.85 | Score above which to pass directly |
+| `threshold_hedge` | 0.50 | Score above which to hedge |
+| `threshold_gate` | 0.30 | Score above which to gate |
+| `hidden_dim` | 256 | Probe MLP hidden dimension |
+| `dropout` | 0.2 | Training dropout rate |
+
+### `ProbeDecision`
+
+`PASS` -> `HEDGE` -> `GATE` -> `ESCALATE` (descending confidence)
+
+## Architecture
+
+```
+Input text
+    |
+Language Model (frozen)
+    | hook at layer floor(0.67 x depth)
+Residual stream vector (hidden_dim)
+    | optional: linear projection (for cross-model)
+Source-space vector (source_dim)
+    |
+MLP probe: Linear -> ReLU -> Dropout -> Linear -> ReLU -> Dropout -> Linear -> Sigmoid
+    |
+Confidence score in [0, 1]
+    |
+Threshold -> ProbeDecision
+```
+
+## Mechanism: negative space of certainty
+
+The probe works because uncertainty has a geometric signature in the residual stream.
+
+At ~2/3 depth, the model has completed most retrieval but not yet committed to output tokens. When the attention mechanism successfully retrieves relevant knowledge, it writes a confident pattern into the residual stream. When retrieval fails, the skip connection dominates, leaving a characteristic "absence of confidence" signature.
+
+This signature is convergent across architectures: different model families encode uncertainty in geometrically similar ways, which is why a simple linear projection suffices for transfer.
+
+## Negative results
+
+Some approaches we tested that **do not work**:
+
+- **Probe-guided DPO**: Weighting DPO pairs by probe confidence amplifies noise (35% confident-wrong vs 1.6% uniform). The probe reads the model's current state; using it to guide training creates feedback loops.
+- **SimPO training**: Produces catastrophic accuracy collapse (44% -> 1.2%) despite improving calibration metrics.
+- **Calibration loss (direct)**: Narrow effective window; most configurations either have no effect or collapse accuracy.
+
+The working approach is **inference-time gating** (probe decides what to show) combined with **training-time DPO** (standard, not probe-guided).
+
+## Citation
+
+```bibtex
+@article{watson2026model,
+  title={The Model Already Knows: Universal Uncertainty Signals in
+         Language Model Residual Streams},
+  author={Watson, Nell and Claude Commons},
+  year={2026},
+  note={Preprint}
+}
+```
+
+## License
+
+Apache 2.0
