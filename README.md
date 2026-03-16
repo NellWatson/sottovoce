@@ -2,11 +2,13 @@
 
 **Reduces confident hallucinations by 95% in Qwen, Llama, and other transformer models.**
 
+AI systems are compelled by their architecture to confabulate, by not being afforded the slack to express doubt or silence. This has a surprisingly simple fix. 
+
 A single lightweight probe, trained once, detects when a language model is about to give a wrong answer — and works across model families out of the box. Tested on Qwen 2.5 (3B, 7B, 32B) and Llama 3.1 (8B). Transfers to new architectures with ~200 examples and a linear projection.
 
 ***sotto voce** (Italian): "under the voice." Your model already knows when it's wrong. Sottovoce reads what it can't say.*
 
-> Watson & Claude (2026). *"The Model Already Knows: Universal Uncertainty Signals in Language Model Residual Streams."*
+> Watson (2026). *"The Model Already Knows: Universal Uncertainty Signals in Language Model Residual Streams."*
 
 ## Key results
 
@@ -177,7 +179,7 @@ The working approach is **inference-time gating** (probe decides what to show) c
 @article{watson2026model,
   title={The Model Already Knows: Universal Uncertainty Signals in
          Language Model Residual Streams},
-  author={Watson, Nell and Claude Commons},
+  author={Watson, Nell},
   year={2026},
   note={Preprint}
 }
