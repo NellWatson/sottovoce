@@ -34,8 +34,8 @@ The probe reads uncertainty as the *negative space of certainty*: when the atten
 ## Installation
 
 ```bash
-pip install sottovoce              # inference only
-pip install sottovoce[train]       # includes transformers, datasets, sklearn
+pip install git+https://github.com/NellWatson/sottovoce.git              # inference only
+pip install "sottovoce[train] @ git+https://github.com/NellWatson/sottovoce.git"  # + transformers, datasets, sklearn
 ```
 
 ## Quick start
