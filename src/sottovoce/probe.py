@@ -152,6 +152,10 @@ class CalibrationProbe:
         """
         Train a linear projection from target model features to source space.
 
+        Alignment set sizing: 200 examples suffice for target hidden dims
+        up to ~5000 (e.g. 7B-32B models). For frontier models with hidden
+        dim 8192+ (e.g. 70B), use 1000+ examples.
+
         Args:
             source_features: (N, source_dim) from the probe's source model
             target_features: (N, target_dim) from the target model

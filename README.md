@@ -77,7 +77,7 @@ print(f"Confidence: {score:.3f} -> {decision.value}")
 ### Cross-model transfer
 
 ```python
-# Train on ~200 shared questions, then deploy
+# Train on shared questions (200 for models up to ~32B, 1000 for 70B+)
 probe = CalibrationProbe.from_pretrained("probes/qwen2.5-3b.pt")
 
 source_feats = probe.extract_features(qwen_model, qwen_tok, questions)
