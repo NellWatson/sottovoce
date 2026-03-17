@@ -39,11 +39,14 @@ Within-family transfer holds across arbitrary scale. Cross-family transfer holds
 ## How it works
 
 1. **Hook** the residual stream at layer floor(0.67 x n_layers)
-2. **Extract** the last-token hidden state (a single vector)
-3. **Score** it through a 2-layer MLP (256 hidden, ReLU, dropout 0.2)
-4. **Decide**: pass / hedge / gate / escalate based on configurable thresholds
+2. **Forward pass** the full text (question + answer concatenated) through the model once
+3. **Extract** the hidden state at the last token position — a single vector that encodes the model's state after seeing its entire answer
+4. **Score** that vector through a 2-layer MLP (256 hidden, ReLU, dropout 0.2)
+5. **Decide**: pass / hedge / gate / escalate based on configurable thresholds
 
-The probe reads uncertainty as the *negative space of certainty*: when the attention mechanism fails to retrieve confident content, the skip connection dominates, and the probe detects this dominance as a self-knowledge signal.
+One forward pass, one vector, one score per response. No token-by-token averaging or pooling. By the time the model reaches the last token, its residual stream has integrated everything it "knows" about the answer it just produced.
+
+The probe reads uncertainty as the *negative space of certainty*: when the attention mechanism fails to retrieve confident content, the skip connection dominates, and the probe detects this dominance as a self-knowledge signal. Notably, output entropy (how flat the token distribution is) carries zero signal — AUROC 0.500, literally chance. A combined probe adding entropy to the residual features actually performs *worse* (0.798 vs 0.840). The uncertainty information lives in the residual stream, not in the output distribution.
 
 ## Installation
 
