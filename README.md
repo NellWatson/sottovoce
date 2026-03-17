@@ -19,22 +19,22 @@ A single lightweight probe, trained once, detects when a language model is about
 | Verbal self-report AUROC | 0.758 |
 | Within-family scale transfer (Qwen 3B -> 32B) | gap 0.004 |
 | Cross-family transfer (Qwen 3B -> Llama 8B) | gap 0.001 |
-| Cross-family frontier (Qwen 3B -> Llama 70B) | gap 0.072 (see below) |
+| Cross-family frontier (Qwen 3B -> Llama 70B) | gap 0.014 (with 1000 alignment examples) |
 | Combined DPO + probe: confident-wrong rate | 1.0% |
 | Combined DPO + probe: gate rate | 70.8% |
 
 ### Transfer map
 
-A probe trained on Qwen 2.5 3B transfers via a linear projection trained on 200 shared questions:
+A probe trained on Qwen 2.5 3B transfers via a linear projection:
 
-| Target model | Params | Transferred AUROC | Native AUROC | Gap | Works? |
+| Target model | Params | Transferred AUROC | Native AUROC | Gap | Alignment Qs |
 |-------------|--------|-------------------|--------------|-----|:------:|
-| Qwen 2.5 7B | 7B | 0.836 | 0.861 | 0.024 | Yes |
-| Llama 3.1 8B | 8B | 0.753 | 0.752 | 0.001 | Yes |
-| Qwen 2.5 32B | 32B | 0.836 | 0.839 | 0.004 | Yes |
-| Llama 3.1 70B | 70B | 0.698 | 0.770 | 0.072 | No |
+| Qwen 2.5 7B | 7B | 0.836 | 0.861 | 0.024 | 200 |
+| Llama 3.1 8B | 8B | 0.753 | 0.752 | 0.001 | 200 |
+| Qwen 2.5 32B | 32B | 0.836 | 0.839 | 0.004 | 200 |
+| Llama 3.1 70B | 70B | 0.742 | 0.756 | 0.014 | 1000 |
 
-Within-family transfer holds across arbitrary scale. Cross-family transfer holds at comparable scale. The simultaneous jump in both family and scale (Qwen 3B -> Llama 70B) exceeds the capacity of a 200-example linear projection. The signal exists in all tested models (native probes work everywhere); the bridge between distant models needs more alignment data or a nonlinear projection.
+Transfer works across all tested architectures and scales. The only variable is how many alignment examples the projection needs: 200 suffice up to 8B cross-family and 32B within-family; 1000 are needed for 70B cross-family (where the projection maps 8192 -> 2048 dimensions). A layer sweep and nonlinear projection were also tested on 70B — neither helped. The bottleneck is data, not geometry.
 
 ## How it works
 
@@ -178,7 +178,7 @@ The probe works because uncertainty has a geometric signature in the residual st
 
 At ~2/3 depth, the model has completed most retrieval but not yet committed to output tokens. When the attention mechanism successfully retrieves relevant knowledge, it writes a confident pattern into the residual stream. When retrieval fails, the skip connection dominates, leaving a characteristic "absence of confidence" signature.
 
-This signature is convergent across architectures at comparable scale. At frontier scale (70B), cross-family transfer degrades — the retrieval boundary may be more diffuse in very deep models (80 layers), and the linear projection becomes underdetermined. The signal exists in every model we tested; only the bridge between distant models needs more engineering.
+This signature is convergent across all tested architectures and scales. At frontier scale (70B cross-family), the linear projection needs more alignment data (1000 examples vs 200) because the dimensionality ratio is larger (8192 -> 2048). The geometry is linear everywhere we tested — a nonlinear projection provides zero improvement.
 
 ## Negative results
 
@@ -187,7 +187,7 @@ Some approaches we tested that **do not work**:
 - **Probe-guided DPO**: Weighting DPO pairs by probe confidence amplifies noise (35% confident-wrong vs 1.6% uniform). The probe reads the model's current state; using it to guide training creates feedback loops.
 - **SimPO training**: Produces catastrophic accuracy collapse (44% -> 1.2%) despite improving calibration metrics.
 - **Calibration loss (direct)**: Narrow effective window; most configurations either have no effect or collapse accuracy.
-- **Cross-family frontier transfer**: Qwen 3B -> Llama 70B via 200-example linear projection shows gap 0.072. The simultaneous jump in architecture and scale exceeds the linear bridge. Addressable with larger alignment sets or nonlinear projections.
+- **Nonlinear projections**: A 2-layer MLP projection provides zero improvement over linear (gap 0.083 vs 0.084 on Llama 70B). The mapping is linear; extra capacity is wasted.
 
 The working approach is **inference-time gating** (probe decides what to show) combined with **training-time DPO** (standard, not probe-guided).
 
