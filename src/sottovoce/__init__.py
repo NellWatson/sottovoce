@@ -21,6 +21,10 @@ Signals in Language Model Residual Streams."
 """
 
 from sottovoce.probe import CalibrationProbe, ProbeConfig, ProbeDecision
+from sottovoce.alignment import load_alignment_set
 
 __version__ = "0.1.0"
-__all__ = ["CalibrationProbe", "ProbeConfig", "ProbeDecision"]
+__all__ = [
+    "CalibrationProbe", "ProbeConfig", "ProbeDecision",
+    "load_alignment_set",
+]

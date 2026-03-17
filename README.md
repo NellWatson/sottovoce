@@ -77,19 +77,25 @@ print(f"Confidence: {score:.3f} -> {decision.value}")
 ### Cross-model transfer
 
 ```python
-# Train on shared questions (200 for models up to ~32B, 1000 for 70B+)
+from sottovoce import CalibrationProbe, load_alignment_set
+
 probe = CalibrationProbe.from_pretrained("probes/qwen2.5-3b.pt")
 
-source_feats = probe.extract_features(qwen_model, qwen_tok, questions)
-target_feats = probe.extract_features(llama_model, llama_tok, questions)
+# Load curated alignment set (includes pre-extracted Qwen 3B features)
+questions, source_feats = load_alignment_set(n=1000)  # 200 for <32B, 1000 for 70B+
 
-loss = probe.train_projection(source_feats, target_feats)
-probe.save_projection("probes/llama3-8b_projection.pt")
+# Only need to run YOUR model
+target_feats = probe.extract_features(your_model, your_tok, questions)
 
-# At inference time on Llama:
-probe.load_projection("probes/llama3-8b_projection.pt")
-score = probe.score(llama_model, llama_tok, text)
+probe.train_projection(source_feats, target_feats)
+probe.save_projection("probes/your_model_projection.pt")
+
+# At inference time:
+probe.load_projection("probes/your_model_projection.pt")
+score = probe.score(your_model, your_tok, text)
 ```
+
+No need to load Qwen 3B — the source features are bundled. The alignment set is geometrically curated: questions span the full uncertainty range, so the projection sees both confident and uncertain examples.
 
 ### Routing decisions
 
