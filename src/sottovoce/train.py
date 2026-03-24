@@ -8,8 +8,8 @@ Usage:
         --n-samples 2000 \
         --output probes/my_probe.pt
 
-Watson (2026). "The Model Already Knows: Cross-Architecture Uncertainty
-Signals in Language Model Residual Streams."
+Watson, N. (forthcoming). "The Model Already Knows: Cross-Architecture
+Uncertainty Signals in Language Model Residual Streams."
 """
 
 from __future__ import annotations

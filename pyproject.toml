@@ -39,7 +39,7 @@ all = [
 
 [project.urls]
 Homepage = "https://github.com/nellwatson/sottovoce"
-Paper = "https://arxiv.org/abs/XXXX.XXXXX"
+Paper = "https://github.com/NellWatson/sottovoce#citation"
 
 [tool.setuptools.packages.find]
 where = ["src"]
