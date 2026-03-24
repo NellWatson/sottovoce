@@ -8,7 +8,7 @@ Usage:
         --n-samples 2000 \
         --output probes/my_probe.pt
 
-Watson & Claude (2026). "The Model Already Knows: Universal Uncertainty
+Watson (2026). "The Model Already Knows: Cross-Architecture Uncertainty
 Signals in Language Model Residual Streams."
 """
 

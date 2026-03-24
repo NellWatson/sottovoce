@@ -7,7 +7,8 @@ attention mechanism at ~2/3 depth fails to retrieve confident content, the
 skip connection dominates, and the probe reads this dominance as a self-
 knowledge signal. The representation is convergent across model families.
 
-Watson & Claude (2026). "The Warmth of Entropy: A Sacred Trust Within Physics."
+Watson (2026). "The Model Already Knows: Cross-Architecture Uncertainty
+Signals in Language Model Residual Streams."
 """
 
 from __future__ import annotations
