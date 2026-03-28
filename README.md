@@ -1,6 +1,6 @@
 # sottovoce
 
-**Detects language model confabulation from the residual stream with AUROC 0.836, transferring across architectures via a linear projection.**
+**Detects language model confabulation from the residual stream with AUROC 0.836, and optionally intervenes, transferring across architectures via a linear projection.**
 
 AI systems are compelled by their architecture to confabulate, by not being afforded the slack to express doubt or silence. The model's own residual stream already encodes whether it is right or wrong; the signal just never reaches the output. Sottovoce reads it.
 
@@ -164,6 +164,23 @@ Options:
 | `hidden_dim` | 256 | Probe MLP hidden dimension |
 | `dropout` | 0.2 | Training dropout rate |
 
+### `ReflexArc`
+
+| Method | Description |
+|--------|-------------|
+| `ReflexArc(model, tokenizer, probe)` | Create arc with a loaded probe |
+| `load_adjuster(path)` | Load trained `LogitAdjuster` weights |
+| `save_adjuster(path)` | Save adjuster weights |
+| `train_adjuster(questions, n_epochs)` | Train a new adjuster on question set |
+| `generate(text)` | Generate with uncertainty-aware hedging |
+
+### `PluckerProbe`
+
+| Method | Description |
+|--------|-------------|
+| `from_pretrained(path)` | Load Plücker probe weights from `.pt` file |
+| `score(model, tokenizer, text)` | Return confidence in [0, 1] using Plücker coordinates |
+
 ### `ProbeDecision`
 
 `PASS` -> `HEDGE` -> `GATE` -> `ESCALATE` (descending confidence)
@@ -183,7 +200,9 @@ MLP probe: Linear -> ReLU -> Dropout -> Linear -> ReLU -> Dropout -> Linear -> S
     |
 Confidence score in [0, 1]
     |
-Threshold -> ProbeDecision
+    +--> [Detection path] -> Threshold -> ProbeDecision (external routing)
+    |
+    +--> [Intervention path] -> LogitAdjuster -> Logit shift -> Modified generation
 ```
 
 ## Mechanism: negative space of certainty
@@ -241,12 +260,82 @@ Bilateral SFT (binary masking: weight=0 on tokens where the probe indicates unce
 
 **Cross-model self-consistency** (sampling a *different* model 5 times, measuring agreement) achieves AUROC 0.705 with Cohen's d 1.15 — the strongest external signal, requiring zero internal access. Combined with the probe signal via logistic regression: AUROC 0.760.
 
+## The reflex arc
+
+The interoceptive deficit is total at the output layer, but the residual stream still carries the signal. The reflex arc closes the loop: a detached probe reads the residual stream during generation, and a `LogitAdjuster` shifts output logits toward hedging tokens when the probe detects uncertainty. The probe never touches the residual stream with gradient; it reads, and the adjuster acts on the logits alone.
+
+| Metric | Control | Reflex Arc | Delta |
+|--------|---------|------------|-------|
+| Confident-wrong | 90.3% | 72.7% | -17.6pp |
+| Hedge on incorrect | 9.7% | 27.3% | +17.6pp |
+| Selective hedging | -5.2% | +9.2% | +14.4pp |
+| Accuracy | 23.8% | 25.2% | +1.4% |
+
+Tested on Qwen 2.5 0.5B with a probe trained on Qwen 2.5 3B and transferred via linear projection (AUROC 0.817).
+
+### The prosthetic principle
+
+The reflex arc is a prosthetic: it helps models that lack native interoception and harms models that already have it. Native interoception emerges as a phase transition between 0.5B and 1.5B parameters (tested on the Qwen 2.5 family). Below that threshold, models confabulate with zero surface uncertainty; the reflex arc supplies what they lack. Above it, models already self-calibrate: Qwen 2.5 3B has native selective hedging of +39.2%, which the reflex arc degrades to +16.8%. The arc interferes with calibration the model already possesses.
+
+The implication: prosthetic interoception is a transitional architecture. As models scale, the reflex arc should be withdrawn, leaving the probe for detection and external gating only.
+
+### API
+
+```python
+from sottovoce import CalibrationProbe, ReflexArc
+
+probe = CalibrationProbe.from_pretrained("probes/qwen2.5-3b.pt")
+probe.load_projection("probes/qwen05b_projection.pt")
+
+arc = ReflexArc(model, tokenizer, probe)
+arc.load_adjuster("adjusters/qwen05b.pt")
+
+# Generate with uncertainty-aware hedging
+output = arc.generate("What year was the Eiffel Tower built?")
+# If uncertain: "I'm not sure, but I believe it was around 1889."
+# If confident: "The Eiffel Tower was built in 1889."
+```
+
+Training a new adjuster:
+
+```python
+arc.train_adjuster(questions, n_epochs=30)
+arc.save_adjuster("adjusters/my_model.pt")
+```
+
+## Plücker probes
+
+Linear probes read the residual stream as a single vector. Plücker probes read it as a set of geometric relationships: the Plücker coordinates of the residual stream capture pairwise structure that a linear probe projects away.
+
+| Probe type | AUROC | Notes |
+|-----------|-------|-------|
+| Linear | 0.765 | Standard approach |
+| Plücker | **0.837** | +0.072 over linear |
+| Random | 0.517 | Near chance (control) |
+
+Cross-correlation between the linear and Plücker probes: 0.872. They read the same underlying signal from different geometric perspectives.
+
+```python
+from sottovoce import PluckerProbe
+
+plucker = PluckerProbe.from_pretrained("probes/qwen3b_plucker.pt")
+score = plucker.score(model, tokenizer, text)
+```
+
 ## Citation
 
 ```bibtex
 @article{watson2026model,
   title={The Model Already Knows: Cross-Architecture Uncertainty Signals in
          Language Model Residual Streams},
+  author={Watson, Nell},
+  year={2026},
+  note={Forthcoming}
+}
+
+@article{watson2026reflex,
+  title={The Reflex Arc: A Prosthetic Architecture for Uncertainty-Awareness
+         in Language Models},
   author={Watson, Nell},
   year={2026},
   note={Forthcoming}

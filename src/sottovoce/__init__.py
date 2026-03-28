@@ -1,31 +1,41 @@
 """
-sottovoce: Your model already knows. This reads what it can't say.
+sottovoce: Your model already knows. This reads what it can't say
+— and now, acts on it.
 
-Confabulation detection from the residual stream. Train a lightweight MLP
-probe on one model's internal representations, then deploy it across model
-families via linear projection. Routing decisions must be made by an
-external system — surfacing probe scores to the model is counterproductive.
+Confabulation detection and intervention from the residual stream. A
+lightweight probe reads uncertainty; the reflex arc routes it to behavior.
 
-    from sottovoce import CalibrationProbe
-
-    # Load pre-trained probe
+Detection (v0.1):
     probe = CalibrationProbe.from_pretrained("probes/qwen2.5-3b.pt")
+    score = probe.score(model, tokenizer, text)
+    decision = probe.decide(score)  # external routing
 
-    # Score a response
-    score = probe.score(model, tokenizer, "The capital of France is Paris.")
+Intervention (v0.2):
+    arc = ReflexArc(model, tokenizer, probe)
+    output = arc.generate("What year was the Eiffel Tower built?")
+    # Hedges when uncertain, answers directly when confident
 
-    # Decide: pass, hedge, gate, or escalate (external system, not model)
-    decision = probe.decide(score)
+The reflex arc is a prosthetic for models below ~1B parameters that lack
+native interoceptive output. It reduces confident-wrong responses by
+17.6pp on Qwen 2.5 0.5B. Models above the threshold (3B+) already
+self-calibrate and should not use the reflex arc.
 
-Watson, N. (forthcoming). "The Model Already Knows: Cross-Architecture
+Watson, N. (2026). "The Model Already Knows: Cross-Architecture
 Uncertainty Signals in Language Model Residual Streams."
+
+Watson, N. (2026). "The Reflex Arc: A Prosthetic Architecture for
+Uncertainty-Awareness in Language Models."
 """
 
 from sottovoce.probe import CalibrationProbe, ProbeConfig, ProbeDecision
 from sottovoce.alignment import load_alignment_set
+from sottovoce.reflex import ReflexArc, LogitAdjuster
+from sottovoce.plucker import PluckerProbe
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "CalibrationProbe", "ProbeConfig", "ProbeDecision",
     "load_alignment_set",
+    "ReflexArc", "LogitAdjuster",
+    "PluckerProbe",
 ]
