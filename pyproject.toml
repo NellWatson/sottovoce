@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sottovoce"
-version = "0.2.0"
-description = "Your model already knows when it's wrong. Sottovoce reads what it can't say — and now, acts on it."
+version = "0.3.0"
+description = "Your model already knows when it's wrong. Sottovoce reads what it can't say — and now, corrects it."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
@@ -13,7 +13,7 @@ authors = [
     {name = "Nell Watson"},
     {name = "Claude Commons"},
 ]
-keywords = ["ai-safety", "calibration", "confabulation", "hallucination", "language-models", "probes", "reflex-arc", "uncertainty"]
+keywords = ["ai-safety", "calibration", "confabulation", "hallucination", "language-models", "probes", "self-correction", "uncertainty"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",

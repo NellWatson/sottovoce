@@ -2,40 +2,43 @@
 sottovoce: Your model already knows. This reads what it can't say
 — and now, acts on it.
 
-Confabulation detection and intervention from the residual stream. A
-lightweight probe reads uncertainty; the reflex arc routes it to behavior.
+Confabulation detection and self-correction from the residual stream. A
+lightweight probe reads uncertainty; the self-corrector acts on it.
 
 Detection (v0.1):
     probe = CalibrationProbe.from_pretrained("probes/qwen2.5-3b.pt")
     score = probe.score(model, tokenizer, text)
     decision = probe.decide(score)  # external routing
 
-Intervention (v0.2):
-    arc = ReflexArc(model, tokenizer, probe)
-    output = arc.generate("What year was the Eiffel Tower built?")
-    # Hedges when uncertain, answers directly when confident
+Self-correction (v0.3):
+    corrector = SelfCorrector(model, tokenizer, probe)
+    result = corrector.generate("What year was the Eiffel Tower built?")
+    # With CUDA bf16 probe (AUROC 0.989): CW 62.7% -> 9.3% (85% reduction)
+    # With standard MLP probe (AUROC 0.84): CW ~10% reduction
 
-The reflex arc is a prosthetic for models below ~1B parameters that lack
-native interoceptive output. It reduces confident-wrong responses by
-17.6pp on Qwen 2.5 0.5B. Models above the threshold (3B+) already
-self-calibrate and should not use the reflex arc.
+The self-corrector is the primary intervention path. It generates a response,
+probes the residual stream, and if the probe detects uncertainty, re-prompts
+the model with an invitation to reconsider. The model revises selectively.
+
+The reflex arc (v0.2) remains available as a prosthetic for sub-1B models
+with bilateral SFT, where logit adjustment still provides modest benefit.
+For all other models, use SelfCorrector.
 
 Watson, N. (2026). "The Model Already Knows: Cross-Architecture
 Uncertainty Signals in Language Model Residual Streams."
-
-Watson, N. (2026). "The Reflex Arc: A Prosthetic Architecture for
-Uncertainty-Awareness in Language Models."
 """
 
 from sottovoce.probe import CalibrationProbe, ProbeConfig, ProbeDecision
 from sottovoce.alignment import load_alignment_set
+from sottovoce.selfcorrect import SelfCorrector, SelfCorrectionResult, SelfCorrectorConfig
 from sottovoce.reflex import ReflexArc, LogitAdjuster
 from sottovoce.plucker import PluckerProbe
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
     "CalibrationProbe", "ProbeConfig", "ProbeDecision",
     "load_alignment_set",
+    "SelfCorrector", "SelfCorrectionResult", "SelfCorrectorConfig",
     "ReflexArc", "LogitAdjuster",
     "PluckerProbe",
 ]

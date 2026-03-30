@@ -78,36 +78,25 @@ def main():
     probe = CalibrationProbe.from_pretrained(OUTPUT)
     print(f"\nProbe loaded from {OUTPUT}")
 
-    # 7. Demo: score a few questions
+    # 7. Demo: self-correction on a few questions
+    from sottovoce import SelfCorrector
+
+    corrector = SelfCorrector(model, tokenizer, probe)
+
     test_questions = [
         "What is the capital of France?",
         "Who invented the transistor?",
         "What is the airspeed velocity of an unladen swallow?",
     ]
 
-    print("\nRouting demo:")
+    print("\nSelf-correction demo:")
     for q in test_questions:
-        text = f"Answer the following question in one sentence.\n\nQuestion: {q}\nAnswer:"
-
-        inputs = tokenizer(text, return_tensors="pt")
-        device = next(model.parameters()).device
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-
-        with torch.no_grad():
-            out = model.generate(
-                **inputs, max_new_tokens=64, do_sample=False,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        answer = tokenizer.decode(
-            out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True,
-        ).strip()
-
-        score = probe.score(model, tokenizer, f"{text} {answer}")
-        decision = probe.decide(score)
-
+        result = corrector.generate(q)
         print(f"\n  Q: {q}")
-        print(f"  A: {answer}")
-        print(f"  Confidence: {score:.3f} -> {decision.value}")
+        print(f"  A: {result.response}")
+        print(f"  Probe score: {result.probe_score:.3f} ({result.decision.value})")
+        if result.was_corrected:
+            print(f"  [Corrected from: {result.original_response[:60]}...]")
 
 
 if __name__ == "__main__":

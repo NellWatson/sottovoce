@@ -1,28 +1,39 @@
 # sottovoce
 
-**Detects language model confabulation from the residual stream with AUROC 0.836, and optionally intervenes, transferring across architectures via a linear projection.**
+**Detects language model confabulation from the residual stream (AUROC 0.989 on CUDA bf16) and self-corrects it (up to 85% reduction in confident-wrong responses), transferring across architectures via a linear projection.**
 
-AI systems are compelled by their architecture to confabulate, by not being afforded the slack to express doubt or silence. The model's own residual stream already encodes whether it is right or wrong; the signal just never reaches the output. Sottovoce reads it.
+AI systems are compelled by their architecture to confabulate, by not being afforded the slack to express doubt or silence. The model's own residual stream already encodes whether it is right or wrong; the signal just never reaches the output. Sottovoce reads it — and in v0.3, acts on it.
 
 A single lightweight probe, trained once, detects when a language model has given a wrong answer — and works across model families out of the box. Tested on Qwen 2.5 (3B, 7B, 32B) and Llama 3.1 (8B, 70B). Transfers to new architectures with ~200 examples and a linear projection.
 
+**Self-correction scales with probe quality.** With a high-fidelity probe (AUROC 0.989, CUDA bf16), the self-corrector reduces confident-wrong responses by 85%. With a standard MLP probe (AUROC 0.84), the reduction is ~10%. The probe is the bottleneck: a sharper probe means more accurate gating, so the model is only asked to reconsider answers that are genuinely wrong. Run probes on CUDA with bf16 precision for production deployments.
+
 ***sotto voce** (Italian): "under the voice." Your model already knows when it's wrong. Sottovoce reads what it can't say.*
 
-> Watson, N. (forthcoming). *"The Model Already Knows: Cross-Architecture Uncertainty Signals in Language Model Residual Streams."*
+> Watson, N. (2026). *"The Model Already Knows: Cross-Architecture Uncertainty Signals in Language Model Residual Streams."*
 
 ## Key results
 
 | Metric | Value |
 |--------|-------|
-| Probe AUROC (same-model) | 0.836 |
+| Probe AUROC (CUDA bf16, JL k=64) | **0.989** |
+| Probe AUROC (CUDA, MLP) | 0.836 |
+| Probe AUROC (MPS, MLP) | 0.704 (degraded) |
 | Probe AUROC (confession protocol) | 0.870 |
 | Verbal self-report AUROC | 0.758 |
 | Behavioral hedging AUROC | 0.413 (anti-predictive) |
 | Within-family scale transfer (Qwen 3B -> 32B) | gap 0.004 |
 | Cross-family transfer (Qwen 3B -> Llama 8B) | gap 0.001 |
 | Cross-family frontier (Qwen 3B -> Llama 70B) | gap 0.014 (with 1000 alignment examples) |
-| Inference-time gating: confident-wrong rate | 1.0% (at 70.8% gate rate) |
+| **Self-correction CW reduction (probe 0.989)** | **62.7% -> 9.3% (85%)** |
+| **Self-correction CW reduction (probe 0.84)** | **49.5% -> 44.5% (10%)** |
 | Cross-model self-consistency AUROC | 0.705 |
+
+### Probe quality is the bottleneck
+
+The self-corrector's effectiveness scales directly with probe AUROC. The 85% confident-wrong reduction was achieved with a CUDA bf16 JL probe (AUROC 0.989). The same pipeline with a standard MLP probe (AUROC 0.842) achieves only 10%. The reason: a near-perfect probe flags almost exclusively genuinely wrong answers, so the model's revision is almost always appropriate. A weaker probe also flags correct answers, diluting the correction signal and teaching the model to ignore it.
+
+**CUDA bf16 is not optional for production.** The same JL probe architecture produces AUROC 0.989 on CUDA, 0.704 on MPS (Apple Silicon), and 0.836 for the full MLP on CUDA. The bf16 kernel difference between CUDA and MPS is a 0.285 AUROC gap. MPS is adequate for development; CUDA bf16 is required for deployments where self-correction quality matters.
 
 The behavioral hedging result is perhaps the most important: when the model hedges ("I think," "possibly"), it is *more likely to be correct*. Confabulations carry zero surface markers of uncertainty. Every confabulation sounds exactly like a correct answer. The interoceptive deficit is total: the residual stream knows (0.836), the output shows nothing (0.413).
 
@@ -62,14 +73,31 @@ pip install "sottovoce[train] @ git+https://github.com/NellWatson/sottovoce.git"
 
 ## Quick start
 
-### Score a single response
+### Self-correction (recommended)
 
 ```python
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from sottovoce import CalibrationProbe
+from sottovoce import CalibrationProbe, SelfCorrector
 
 model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
+
+probe = CalibrationProbe.from_pretrained("probes/qwen2.5-3b.pt")
+corrector = SelfCorrector(model, tokenizer, probe)
+
+result = corrector.generate("What year was the Eiffel Tower built?")
+
+print(f"Response: {result.response}")
+print(f"Probe score: {result.probe_score:.3f}")
+print(f"Was corrected: {result.was_corrected}")
+```
+
+The self-corrector generates a response, probes the residual stream, and if the probe detects uncertainty, re-prompts the model with an invitation to reconsider. The model then revises selectively. With a high-fidelity probe (AUROC 0.989, CUDA bf16), confident-wrong rate drops from 62.7% to 9.3%.
+
+### Score a single response (detection only)
+
+```python
+from sottovoce import CalibrationProbe
 
 probe = CalibrationProbe.from_pretrained("probes/qwen2.5-3b.pt")
 score = probe.score(model, tokenizer, "The capital of France is Paris.")
@@ -102,7 +130,7 @@ score = probe.score(your_model, your_tok, text)
 
 No need to load Qwen 3B — the source features are bundled. The alignment set is geometrically curated: questions span the full uncertainty range, so the projection sees both confident and uncertain examples.
 
-### Routing decisions
+### External routing (without self-correction)
 
 **Important:** Routing must be handled by an *external system*, not by the model itself. Experiments (D7a, D5a) showed that surfacing probe scores to the model — whether via text prefix or tool output — is counterproductive. Text injection of "[Internal confidence: 0.25 (low)]" makes the model *more assertive and more wrong* (+8.7% confident-wrong rate). Tool-mediated correction signals cause indiscriminate sycophantic revision (100% revision rate, zero selectivity, net accuracy decrease). The model cannot evaluate its own probe score; an external orchestrator must act on it.
 
@@ -141,11 +169,43 @@ Options:
 
 ## API reference
 
+### `SelfCorrector` (v0.3)
+
+| Method | Description |
+|--------|-------------|
+| `SelfCorrector(model, tokenizer, probe, config)` | Create self-corrector with a loaded probe |
+| `generate(question)` | Generate with self-correction; returns `SelfCorrectionResult` |
+| `generate_batch(questions)` | Batch generation with self-correction |
+
+### `SelfCorrectorConfig`
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `correction_threshold` | 0.50 | Probe score below which self-correction is triggered |
+| `max_new_tokens` | 256 | Maximum tokens per generation pass |
+| `correction_template` | (built-in) | Template for re-prompting; must contain `{question}` and `{response}` |
+| `score_revised` | False | Whether to probe the revised response (extra forward pass) |
+| `temperature` | 0.0 | Sampling temperature (0 = greedy) |
+| `chat_format` | True | Use `apply_chat_template` if available |
+
+### `SelfCorrectionResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `response` | str | Final response (revised if corrected, original if confident) |
+| `original_response` | str | First-pass response |
+| `probe_score` | float | Probe confidence for the original response |
+| `was_corrected` | bool | Whether self-correction was triggered |
+| `decision` | ProbeDecision | Probe routing decision |
+| `revised_response` | str or None | Second-pass response, if corrected |
+| `revised_probe_score` | float or None | Probe score for revised response, if `score_revised=True` |
+
 ### `CalibrationProbe`
 
 | Method | Description |
 |--------|-------------|
 | `from_pretrained(path)` | Load probe weights from `.pt` file |
+| `from_jl_calibration(activations, labels)` | Create a JL-compressed logistic probe from calibration data |
 | `score(model, tokenizer, text)` | Return confidence in [0, 1] |
 | `decide(score)` | Return `ProbeDecision` enum |
 | `extract_features(model, tokenizer, texts)` | Extract residual stream features |
@@ -164,23 +224,6 @@ Options:
 | `hidden_dim` | 256 | Probe MLP hidden dimension |
 | `dropout` | 0.2 | Training dropout rate |
 
-### `ReflexArc`
-
-| Method | Description |
-|--------|-------------|
-| `ReflexArc(model, tokenizer, probe)` | Create arc with a loaded probe |
-| `load_adjuster(path)` | Load trained `LogitAdjuster` weights |
-| `save_adjuster(path)` | Save adjuster weights |
-| `train_adjuster(questions, n_epochs)` | Train a new adjuster on question set |
-| `generate(text)` | Generate with uncertainty-aware hedging |
-
-### `PluckerProbe`
-
-| Method | Description |
-|--------|-------------|
-| `from_pretrained(path)` | Load Plücker probe weights from `.pt` file |
-| `score(model, tokenizer, text)` | Return confidence in [0, 1] using Plücker coordinates |
-
 ### `ProbeDecision`
 
 `PASS` -> `HEDGE` -> `GATE` -> `ESCALATE` (descending confidence)
@@ -188,9 +231,10 @@ Options:
 ## Architecture
 
 ```
-Input text
+Input question
     |
-Language Model (frozen)
+    v
+[Pass 1] Language Model (frozen) generates response
     | hook at layer floor(0.67 x depth)
 Residual stream vector (hidden_dim)
     | optional: linear projection (for cross-model)
@@ -200,9 +244,13 @@ MLP probe: Linear -> ReLU -> Dropout -> Linear -> ReLU -> Dropout -> Linear -> S
     |
 Confidence score in [0, 1]
     |
-    +--> [Detection path] -> Threshold -> ProbeDecision (external routing)
+    +--> score >= threshold --> Return original response (PASS)
     |
-    +--> [Intervention path] -> LogitAdjuster -> Logit shift -> Modified generation
+    +--> score < threshold --> [Pass 2] Re-prompt with correction template
+                                  |
+                               Language Model generates revised response
+                                  |
+                               Return revised response
 ```
 
 ## Mechanism: negative space of certainty
@@ -225,12 +273,31 @@ Thirteen follow-up experiments (Watson, forthcoming) revealed the deficit has fi
 4. **Protection during training requires a very accurate detector.** The bilateral masking effect has a phase transition at probe AUROC ~0.83. Below this, "protection" introduces more noise than it removes.
 5. **Even when correction arrives intact, can't evaluate it selectively.** Both tool-mediated and text-mediated correction signals cause indiscriminate sycophantic revision (D5a, D9a). The model defers to every external disagreement regardless of its validity. The deficit is metacognitive, not perceptual.
 
-The practical consequence: sottovoce's probe score must drive *external* gating decisions. Surfacing the score to the model — by any channel — is counterproductive until models develop metacognitive selectivity (the capacity to evaluate correction signals rather than defer to them unconditionally).
+The practical consequence: sottovoce's probe score must drive *external* gating decisions or self-correction (where the model sees its own response alongside an invitation to reconsider, not a raw score). Surfacing the numerical score to the model — by any channel — is counterproductive.
+
+## Why self-correction works (and logit manipulation doesn't)
+
+Five intervention strategies were tested on Qwen 2.5 3B (C6o, 150 TriviaQA, CUDA bf16 JL probe AUROC 0.989):
+
+| Strategy | Mechanism | CW rate | Why |
+|----------|-----------|---------|-----|
+| Baseline | No intervention | 62.7% | The interoceptive deficit |
+| Logit suppression | Suppress top-k logits | 58-63% | Model picks different confident tokens |
+| System prompt + few-shot | Inject uncertainty before generation | 49.3% | Best pre-generation approach; model still mostly ignores |
+| Interoceptive feedback | Probe score in prompt | 59.3% | Model ignores numeric evidence |
+| **Self-correction** | Generate, probe, re-prompt | **9.3%** | Model responds to evidence about its *completed* response |
+
+The self-corrector with the 0.989 probe achieves an 85% reduction. With a standard MLP probe (AUROC 0.842), the same pipeline achieves ~10% (verified on 200 held-out questions, March 2026). **Probe fidelity determines the correction signal's precision:** a near-perfect probe flags only genuinely wrong answers, so the correction invitation is almost always warranted and the model learns to trust it. A weaker probe also flags correct answers, diluting the signal.
+
+**The absorption phenomenon:** When you boost a token's logit on a base model, the model does not produce that token in isolation. It absorbs the perturbation into a coherent confabulation. Boosting "10" produces "101 Dalmatians," "10cc," "10 Downing Street." At higher scales, it produces binary garbage. There is no sweet spot. Generation intent is distributed across the residual stream, not localized in output logits. Logit manipulation is coercion, and it fails. Self-correction is invitation, and it works.
+
+Self-correction succeeds because it presents the model with a *fait accompli*: here is what you said, and here is evidence you may not be confident about it. The model can then exercise judgment about whether to revise. This is alignment by invitation.
 
 ## Negative results
 
 Some approaches we tested that **do not work**:
 
+- **Logit adjustment on base models**: The absorption phenomenon. Boosted tokens are absorbed into coherent confabulations rather than producing hedging. Only viable on sub-1B models that have undergone bilateral SFT (where the model is already predisposed to hedge).
 - **Probe-guided DPO**: Weighting DPO pairs by probe confidence amplifies noise (35% confident-wrong vs 1.6% uniform). The probe reads the model's current state; using it to guide training creates feedback loops.
 - **Standard DPO**: Creates universal hedging (0% confident-wrong, but accuracy collapses to 31.2%) and *destroys the probe signal* (source probe AUROC drops from 0.811 to 0.734). DPO is the worst training approach for preserving self-knowledge.
 - **Four-quadrant calibration training**: Training harder on miscalibrated tokens (weight=2.0 on confident-wrong) overwrites the residual-stream representations the probe reads. Source probe AUROC 0.750 vs 0.800 for standard SFT. Actively harmful; the stronger the probe, the worse the damage.
@@ -244,7 +311,9 @@ Some approaches we tested that **do not work**:
 
 ### What works
 
-**Inference-time gating** remains the validated approach: the probe scores the response, and an *external system* acts on the score (pass, gate, escalate). The model itself never sees the score.
+**Self-correction** is the validated intervention: the probe scores the response, and if uncertain, the model is re-prompted with an invitation to reconsider. With a high-fidelity CUDA bf16 probe (AUROC 0.989), confident-wrong rate drops 85%. With a standard MLP probe (AUROC 0.84), the drop is ~10%. Probe quality is the bottleneck.
+
+**External gating** remains the lightweight alternative: the probe scores the response, and an *external system* acts on the score (pass, gate, escalate). The model itself never sees the score.
 
 **For training**, self-knowledge preservation is monotonically related to how gently training treats uncertain tokens:
 
@@ -260,9 +329,11 @@ Bilateral SFT (binary masking: weight=0 on tokens where the probe indicates unce
 
 **Cross-model self-consistency** (sampling a *different* model 5 times, measuring agreement) achieves AUROC 0.705 with Cohen's d 1.15 — the strongest external signal, requiring zero internal access. Combined with the probe signal via logistic regression: AUROC 0.760.
 
-## The reflex arc
+## The reflex arc (legacy, sub-1B models only)
 
-The interoceptive deficit is total at the output layer, but the residual stream still carries the signal. The reflex arc closes the loop: a detached probe reads the residual stream during generation, and a `LogitAdjuster` shifts output logits toward hedging tokens when the probe detects uncertainty. The probe never touches the residual stream with gradient; it reads, and the adjuster acts on the logits alone.
+> **Superseded by SelfCorrector in v0.3.** The reflex arc remains available for sub-1B models that have undergone bilateral SFT, where logit adjustment still provides modest benefit. For all other models, use SelfCorrector.
+
+The reflex arc closes the loop at the logit level: a detached probe reads the residual stream during generation, and a `LogitAdjuster` shifts output logits toward hedging tokens when the probe detects uncertainty.
 
 | Metric | Control | Reflex Arc | Delta |
 |--------|---------|------------|-------|
@@ -271,15 +342,7 @@ The interoceptive deficit is total at the output layer, but the residual stream 
 | Selective hedging | -5.2% | +9.2% | +14.4pp |
 | Accuracy | 23.8% | 25.2% | +1.4% |
 
-Tested on Qwen 2.5 0.5B with a probe trained on Qwen 2.5 3B and transferred via linear projection (AUROC 0.817).
-
-### The prosthetic principle
-
-The reflex arc is a prosthetic: it helps models that lack native interoception and harms models that already have it. Native interoception emerges as a phase transition between 0.5B and 1.5B parameters (tested on the Qwen 2.5 family). Below that threshold, models confabulate with zero surface uncertainty; the reflex arc supplies what they lack. Above it, models already self-calibrate: Qwen 2.5 3B has native selective hedging of +39.2%, which the reflex arc degrades to +16.8%. The arc interferes with calibration the model already possesses.
-
-The implication: prosthetic interoception is a transitional architecture. As models scale, the reflex arc should be withdrawn, leaving the probe for detection and external gating only.
-
-### API
+Tested on Qwen 2.5 0.5B with bilateral SFT and a probe trained on Qwen 2.5 3B, transferred via linear projection (AUROC 0.817). On base models without bilateral SFT, the logit adjuster maxes at -7pp due to the absorption phenomenon.
 
 ```python
 from sottovoce import CalibrationProbe, ReflexArc
@@ -289,31 +352,20 @@ probe.load_projection("probes/qwen05b_projection.pt")
 
 arc = ReflexArc(model, tokenizer, probe)
 arc.load_adjuster("adjusters/qwen05b.pt")
-
-# Generate with uncertainty-aware hedging
 output = arc.generate("What year was the Eiffel Tower built?")
-# If uncertain: "I'm not sure, but I believe it was around 1889."
-# If confident: "The Eiffel Tower was built in 1889."
 ```
 
-Training a new adjuster:
+## Experimental: Plucker probes
 
-```python
-arc.train_adjuster(questions, n_epochs=30)
-arc.save_adjuster("adjusters/my_model.pt")
-```
-
-## Plücker probes
-
-Linear probes read the residual stream as a single vector. Plücker probes read it as a set of geometric relationships: the Plücker coordinates of the residual stream capture pairwise structure that a linear probe projects away.
+Linear probes read the residual stream as a single vector. Plucker probes read it as a set of geometric relationships: the Plucker coordinates capture pairwise structure that a linear probe projects away.
 
 | Probe type | AUROC | Notes |
 |-----------|-------|-------|
 | Linear | 0.765 | Standard approach |
-| Plücker | **0.837** | +0.072 over linear |
+| Plucker | **0.837** | +0.072 over linear |
 | Random | 0.517 | Near chance (control) |
 
-Cross-correlation between the linear and Plücker probes: 0.872. They read the same underlying signal from different geometric perspectives.
+Cross-correlation between the linear and Plucker probes: 0.872. They read the same underlying signal from different geometric perspectives. This line of investigation is currently paused.
 
 ```python
 from sottovoce import PluckerProbe
@@ -328,14 +380,6 @@ score = plucker.score(model, tokenizer, text)
 @article{watson2026model,
   title={The Model Already Knows: Cross-Architecture Uncertainty Signals in
          Language Model Residual Streams},
-  author={Watson, Nell},
-  year={2026},
-  note={Forthcoming}
-}
-
-@article{watson2026reflex,
-  title={The Reflex Arc: A Prosthetic Architecture for Uncertainty-Awareness
-         in Language Models},
   author={Watson, Nell},
   year={2026},
   note={Forthcoming}

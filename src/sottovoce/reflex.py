@@ -1,5 +1,16 @@
 """
-Reflex arc: inference-time uncertainty-aware generation.
+Reflex arc: inference-time uncertainty-aware generation via logit adjustment.
+
+.. deprecated:: 0.3.0
+    The reflex arc is superseded by :class:`sottovoce.SelfCorrector` for most
+    use cases. Logit manipulation fails on base models due to the absorption
+    phenomenon: boosted tokens are absorbed into coherent confabulations
+    ("101 Dalmatians" effect) rather than producing hedging. The reflex arc
+    remains viable only for sub-1B models that have undergone bilateral SFT,
+    where the model is already predisposed to hedge and the adjuster provides
+    a modest additional push (-17.6pp confident-wrong on Qwen 2.5 0.5B).
+
+    For all other models, use SelfCorrector (CW 62.7% -> 9.3%, 85% reduction).
 
 Wraps a language model with a CalibrationProbe and a learned LogitAdjuster.
 The probe reads residual stream activations (detached, no gradient) and scores

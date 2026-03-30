@@ -71,6 +71,80 @@ class _ProbeNet(nn.Module):
             return torch.sigmoid(self.forward(x))
 
 
+class _JLLogisticNet(nn.Module):
+    """JL-compressed logistic probe: random projection + logistic regression.
+
+    Drop-in replacement for _ProbeNet in the Tier 1 (coarse) deployment.
+    CV AUROC 0.638 at k=64 (vs 0.704 for full MLP), ~513KB, ~262K FLOPs.
+    """
+
+    def __init__(self, input_dim: int, k: int = 64, seed: int = 42):
+        super().__init__()
+        self.k = k
+        self.input_dim = input_dim
+
+        # Fixed random projection (not trainable).
+        rng = np.random.RandomState(seed)
+        R_np = rng.randn(k, input_dim).astype(np.float32) / np.sqrt(k)
+        self.register_buffer("R", torch.from_numpy(R_np))
+
+        # Logistic regression (trainable or loaded from sklearn).
+        self.logistic = nn.Linear(k, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        projected = x @ self.R.T  # (B, k)
+        return self.logistic(projected)
+
+    def predict_proba(self, x: torch.Tensor) -> torch.Tensor:
+        with torch.no_grad():
+            return torch.sigmoid(self.forward(x))
+
+    @classmethod
+    def from_sklearn(
+        cls,
+        input_dim: int,
+        k: int,
+        seed: int,
+        coef: np.ndarray,
+        intercept: float,
+    ) -> "_JLLogisticNet":
+        """Load weights from a trained sklearn LogisticRegression."""
+        net = cls(input_dim=input_dim, k=k, seed=seed)
+        with torch.no_grad():
+            net.logistic.weight.copy_(torch.from_numpy(coef.astype(np.float32)))
+            net.logistic.bias.fill_(intercept)
+        net.eval()
+        return net
+
+    @classmethod
+    def from_calibration(
+        cls,
+        activations: np.ndarray,
+        labels: np.ndarray,
+        k: int = 64,
+        seed: int = 42,
+    ) -> "_JLLogisticNet":
+        """Train from raw activations and correctness labels."""
+        from sklearn.linear_model import LogisticRegression
+
+        input_dim = activations.shape[1]
+        rng = np.random.RandomState(seed)
+        R = rng.randn(k, input_dim).astype(np.float32) / np.sqrt(k)
+        X_proj = activations @ R.T
+
+        confab = 1 - labels
+        clf = LogisticRegression(max_iter=1000, solver="lbfgs", random_state=seed)
+        clf.fit(X_proj, confab)
+
+        return cls.from_sklearn(
+            input_dim=input_dim,
+            k=k,
+            seed=seed,
+            coef=clf.coef_,
+            intercept=float(clf.intercept_[0]),
+        )
+
+
 class CalibrationProbe:
     """
     Universal calibration probe for confabulation detection.
@@ -331,3 +405,38 @@ class CalibrationProbe:
         if self._projection is None:
             raise ValueError("No projection to save")
         torch.save(self._projection.state_dict(), str(path))
+
+    @classmethod
+    def from_jl_calibration(
+        cls,
+        activations: np.ndarray,
+        labels: np.ndarray,
+        k: int = 64,
+        seed: int = 42,
+        config: Optional[ProbeConfig] = None,
+    ) -> "CalibrationProbe":
+        """Create a Tier 1 JL-compressed logistic probe from calibration data.
+
+        The probe uses a fixed random projection (JL lemma) followed by
+        logistic regression. CV AUROC 0.638 at k=64 (C6i).
+
+        Args:
+            activations: (N, d) residual stream activations.
+            labels: (N,) correctness labels (1=correct, 0=wrong).
+            k: JL projection dimension (default 64, the production sweet spot).
+            seed: Random seed for projection matrix.
+            config: Optional probe configuration.
+
+        Returns:
+            CalibrationProbe with JL logistic probe as its internal network.
+        """
+        instance = cls(config=config)
+        instance._probe = _JLLogisticNet.from_calibration(
+            activations=activations,
+            labels=labels,
+            k=k,
+            seed=seed,
+        )
+        # JL probe handles its own projection; disable the external one.
+        instance._projection = None
+        return instance

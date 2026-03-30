@@ -33,7 +33,7 @@ CACHE_DIR = Path(os.environ.get(
 ))
 
 RELEASE_URL = (
-    "https://github.com/NellWatson/sottovoce/releases/download/v0.1.0"
+    "https://github.com/NellWatson/sottovoce/releases/download/v0.3.0"
 )
 
 
