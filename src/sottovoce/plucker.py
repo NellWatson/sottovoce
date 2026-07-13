@@ -1,17 +1,19 @@
 """
-Plucker coordinate probe: a learned projection from residual stream activations
-to 6D Plucker space, followed by a standard MLP probe.
+Low-rank bottleneck probe (historically named "Plucker"): a learned linear
+projection from residual stream activations to a 6-dimensional bottleneck,
+followed by a standard 2-layer MLP probe.
 
-Plucker coordinates are a 6-dimensional coordinate system for lines in 3D
-projective space. When applied to high-dimensional residual stream vectors,
-the learned Plucker projection captures geometric relationships between
-activation directions that linear probes miss entirely.
+NAMING CAVEAT: despite the class name, this does NOT compute Plucker line
+coordinates in the geometric sense -- there are no 2x2 minors and no
+Grassmann-Plucker relation. It is a plain Linear(hidden_dim -> 6) bottleneck
+(see PLUCKER_DIM) feeding an MLP. The name is retained only for continuity
+with the experiment logs; treat it as a low-rank nonlinear probe.
 
-Experimental results (Watson, 2026):
-    Plucker probe AUROC 0.837
-    Linear probe  AUROC 0.765
-    Random         AUROC 0.517
-    Gap over random: 0.320 -- the geometry is functional, not decorative.
+The gain over a direct linear probe comes from the nonlinear MLP over a
+6-dimensional bottleneck, not from projective-line geometry:
+    Low-rank bottleneck  AUROC 0.837
+    Linear (direct)      AUROC 0.765
+    Random (control)     AUROC 0.517
 
 Watson, N. (2026). "The Model Already Knows: Cross-Architecture
 Uncertainty Signals in Language Model Residual Streams."
@@ -20,7 +22,6 @@ Uncertainty Signals in Language Model Residual Streams."
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Union
 
 import numpy as np
 import torch
@@ -34,15 +35,16 @@ PLUCKER_DIM = 6
 
 class PluckerProbe(CalibrationProbe):
     """
-    Calibration probe with a learned Plucker coordinate projection.
+    Calibration probe with a learned low-rank (6-dim) bottleneck.
 
     Projects residual stream activations (hidden_dim) through a learned
-    linear map to 6D Plucker space, then feeds the 6D vector through a
-    standard 2-layer MLP probe. The projection and probe are trained
-    jointly end-to-end.
+    linear map to a 6-dimensional bottleneck, then feeds that vector through
+    a standard 2-layer MLP probe. The projection and probe are trained
+    jointly end-to-end. (The "Plucker" name is historical; this is not
+    projective-line geometry -- see the module docstring.)
 
     Pipeline:
-        residual (hidden_dim) -> Plucker projection (6) -> MLP probe (1) -> sigmoid
+        residual (hidden_dim) -> linear bottleneck (6) -> MLP probe (1) -> sigmoid
 
     Usage:
         probe = PluckerProbe.from_pretrained("path/to/plucker_probe.pt")
@@ -52,8 +54,8 @@ class PluckerProbe(CalibrationProbe):
 
     def __init__(
         self,
-        config: Optional[ProbeConfig] = None,
-        hidden_dim: Optional[int] = None,
+        config: ProbeConfig | None = None,
+        hidden_dim: int | None = None,
     ):
         config = config or ProbeConfig()
         self._hidden_dim = hidden_dim or config.source_dim
@@ -65,18 +67,20 @@ class PluckerProbe(CalibrationProbe):
             hidden_dim=self.config.hidden_dim,
             dropout=self.config.dropout,
         )
-        self._projection: Optional[nn.Linear] = None
-        self._captured_activation: Optional[torch.Tensor] = None
+        self._probe.eval()  # deterministic scoring (dropout off) until trained
+        self._projection: nn.Linear | None = None
+        self._captured_activation: torch.Tensor | None = None
 
-        # Learned linear map from residual stream to 6D Plucker space
+        # Learned linear map from residual stream to a 6-dim bottleneck
+        # (historically called "Plucker"; not projective-line geometry)
         self._plucker = nn.Linear(self._hidden_dim, PLUCKER_DIM)
 
     @classmethod
     def from_pretrained(
         cls,
-        name_or_path: Union[str, Path],
-        config: Optional[ProbeConfig] = None,
-    ) -> "PluckerProbe":
+        name_or_path: str | Path,
+        config: ProbeConfig | None = None,
+    ) -> PluckerProbe:
         """
         Load a pre-trained Plucker probe from a .pt file.
 
@@ -112,7 +116,7 @@ class PluckerProbe(CalibrationProbe):
         model: nn.Module,
         tokenizer,
         text: str,
-        probe_layer: Optional[int] = None,
+        probe_layer: int | None = None,
     ) -> float:
         """
         Score a text input for confidence via Plucker projection.
@@ -261,7 +265,7 @@ class PluckerProbe(CalibrationProbe):
 
         return best_auroc
 
-    def save(self, path: Union[str, Path]) -> None:
+    def save(self, path: str | Path) -> None:
         """
         Save both Plucker projection and probe weights to a single .pt file.
 
@@ -273,7 +277,7 @@ class PluckerProbe(CalibrationProbe):
         }
         torch.save(checkpoint, str(path))
 
-    def save_projection(self, path: Union[str, Path]) -> None:
+    def save_projection(self, path: str | Path) -> None:
         """Save cross-model transfer projection weights to a .pt file."""
         if self._projection is None:
             raise ValueError("No projection to save")

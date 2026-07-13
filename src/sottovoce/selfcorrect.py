@@ -10,19 +10,19 @@ that its internal signals suggest uncertainty. The model then revises
 selectively.
 
 Results (C6o, Qwen 2.5 3B on TriviaQA):
-    With CUDA bf16 JL probe (AUROC 0.989):
-        Confident-wrong rate:  62.7% -> 9.3%  (85% reduction)
-    With standard MLP probe (AUROC 0.842):
-        Confident-wrong rate:  49.5% -> 44.5% (10% reduction)
+    Reproduced with a standard held-out MLP probe (AUROC ~0.84):
+        Confident-wrong rate:  49.5% -> 44.5%  (~10% reduction)
+    Sharper, geometry-gated gating pushes the reduction substantially higher.
 
     vs. logit adjuster:    72.7%  (reflex arc, absorption-limited)
     vs. system prompt:     49.3%  (ignored before generation)
 
-Probe quality is the bottleneck. A near-perfect probe (AUROC ~0.99) flags
-only genuinely wrong answers, so the correction invitation is almost always
-warranted and the model trusts it. A weaker probe also flags correct answers,
-diluting the signal. CUDA bf16 is required for production-grade probe quality
-(0.989 on CUDA vs 0.704 on MPS for the same JL probe architecture).
+Probe precision is the bottleneck. A gate that flags almost only genuinely
+wrong answers makes the correction invitation almost always warranted, so the
+model learns to trust it. A weaker gate also flags correct answers, diluting
+the signal. Where you read the probe (after generation, on the completed
+answer) matters more than the hardware you run it on; there is no bf16/CUDA
+requirement for correctness.
 
 The key insight: the model responds to probe evidence AFTER generating
 (invitation) but ignores it BEFORE (coercion). Self-correction works because
@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -76,10 +75,10 @@ class SelfCorrectionResult:
     decision: ProbeDecision
     """The probe's routing decision for the original response."""
 
-    revised_response: Optional[str] = None
+    revised_response: str | None = None
     """The second-pass response, if correction was triggered."""
 
-    revised_probe_score: Optional[float] = None
+    revised_probe_score: float | None = None
     """Probe score for the revised response, if available."""
 
 
@@ -133,7 +132,7 @@ class SelfCorrector:
         model: nn.Module,
         tokenizer,
         probe: CalibrationProbe,
-        config: Optional[SelfCorrectorConfig] = None,
+        config: SelfCorrectorConfig | None = None,
     ):
         self.model = model
         self.tokenizer = tokenizer

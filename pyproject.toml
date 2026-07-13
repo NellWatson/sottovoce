@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sottovoce"
 version = "0.3.0"
-description = "Your model already knows when it's wrong. Sottovoce reads what it can't say — and now, corrects it."
+description = "Residual-stream confabulation detection and self-correction for language models."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
@@ -18,7 +18,12 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
@@ -33,13 +38,29 @@ train = [
     "scikit-learn",
     "accelerate",
 ]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+]
 all = [
-    "sottovoce[train]",
+    "sottovoce[train,dev]",
 ]
 
+[project.scripts]
+sottovoce-train = "sottovoce.train:main"
+
 [project.urls]
-Homepage = "https://github.com/nellwatson/sottovoce"
-Paper = "https://github.com/NellWatson/sottovoce#citation"
+Homepage = "https://github.com/NellWatson/sottovoce"
+Repository = "https://github.com/NellWatson/sottovoce"
+Issues = "https://github.com/NellWatson/sottovoce/issues"
+Changelog = "https://github.com/NellWatson/sottovoce/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]

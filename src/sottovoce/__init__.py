@@ -13,8 +13,8 @@ Detection (v0.1):
 Self-correction (v0.3):
     corrector = SelfCorrector(model, tokenizer, probe)
     result = corrector.generate("What year was the Eiffel Tower built?")
-    # With CUDA bf16 probe (AUROC 0.989): CW 62.7% -> 9.3% (85% reduction)
-    # With standard MLP probe (AUROC 0.84): CW ~10% reduction
+    # Reduction scales with probe precision: ~10% CW reduction reproduced
+    # with a standard MLP probe (AUROC ~0.84); higher with geometry-gated gating.
 
 The self-corrector is the primary intervention path. It generates a response,
 probes the residual stream, and if the probe detects uncertainty, re-prompts
@@ -28,16 +28,17 @@ Watson, N. (2026). "The Model Already Knows: Cross-Architecture
 Uncertainty Signals in Language Model Residual Streams."
 """
 
-from sottovoce.probe import CalibrationProbe, ProbeConfig, ProbeDecision
 from sottovoce.alignment import load_alignment_set
-from sottovoce.selfcorrect import SelfCorrector, SelfCorrectionResult, SelfCorrectorConfig
-from sottovoce.reflex import ReflexArc, LogitAdjuster
+from sottovoce.hub import load_base_probe
 from sottovoce.plucker import PluckerProbe
+from sottovoce.probe import CalibrationProbe, ProbeConfig, ProbeDecision
+from sottovoce.reflex import LogitAdjuster, ReflexArc
+from sottovoce.selfcorrect import SelfCorrectionResult, SelfCorrector, SelfCorrectorConfig
 
 __version__ = "0.3.0"
 __all__ = [
     "CalibrationProbe", "ProbeConfig", "ProbeDecision",
-    "load_alignment_set",
+    "load_base_probe", "load_alignment_set",
     "SelfCorrector", "SelfCorrectionResult", "SelfCorrectorConfig",
     "ReflexArc", "LogitAdjuster",
     "PluckerProbe",

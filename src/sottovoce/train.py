@@ -8,7 +8,7 @@ Usage:
         --n-samples 2000 \
         --output probes/my_probe.pt
 
-Watson, N. (forthcoming). "The Model Already Knows: Cross-Architecture
+Watson, N. (in preparation). "The Model Already Knows: Cross-Architecture
 Uncertainty Signals in Language Model Residual Streams."
 """
 
@@ -18,7 +18,6 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import torch
@@ -307,7 +306,7 @@ def compute_final_metrics(
     }
 
 
-def main(args: Optional[list[str]] = None):
+def main(args: list[str] | None = None):
     parser = argparse.ArgumentParser(
         description="Train a calibration probe on a language model's residual stream.",
     )
@@ -444,7 +443,7 @@ def main(args: Optional[list[str]] = None):
             json.dump(metrics_out, f, indent=2)
         logger.info(f"Saved metrics to {parsed.save_metrics}")
 
-    print(f"\nProbe trained successfully.")
+    print("\nProbe trained successfully.")
     print(f"  AUROC: {final['auroc']:.4f}")
     print(f"  ECE:   {final['ece']:.4f}")
     print(f"  Saved: {output_path}")

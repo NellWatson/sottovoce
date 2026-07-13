@@ -21,38 +21,16 @@ Usage:
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
-CACHE_DIR = Path(os.environ.get(
-    "SOTTOVOCE_CACHE",
-    Path.home() / ".cache" / "sottovoce",
-))
-
-RELEASE_URL = (
-    "https://github.com/NellWatson/sottovoce/releases/download/v0.3.0"
-)
-
-
-def _ensure_cache_dir() -> Path:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    return CACHE_DIR
-
-
-def _download_file(url: str, dest: Path) -> None:
-    """Download a file from URL to dest path."""
-    import urllib.request
-    print(f"  Downloading {dest.name}...")
-    urllib.request.urlretrieve(url, str(dest))
-    print(f"  Saved to {dest}")
+from sottovoce.hub import RELEASE_URL, _download_file, _ensure_cache_dir
 
 
 def load_alignment_set(
-    n: Optional[int] = None,
-    cache_dir: Optional[Path] = None,
+    n: int | None = None,
+    cache_dir: Path | None = None,
 ) -> tuple[list[str], np.ndarray]:
     """
     Load the curated alignment set for cross-model transfer.

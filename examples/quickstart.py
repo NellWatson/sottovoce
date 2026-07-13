@@ -13,17 +13,18 @@ This script:
 6. Demonstrates routing decisions
 """
 
-from sottovoce import CalibrationProbe
-from sottovoce.train import (
-    load_model_and_tokenizer,
-    load_triviaqa,
-    generate_and_judge,
-    extract_features_batch,
-    train_probe,
-    compute_final_metrics,
-)
 import numpy as np
 import torch
+
+from sottovoce import CalibrationProbe
+from sottovoce.train import (
+    compute_final_metrics,
+    extract_features_batch,
+    generate_and_judge,
+    load_model_and_tokenizer,
+    load_triviaqa,
+    train_probe,
+)
 
 
 def main():
@@ -65,7 +66,7 @@ def main():
 
     # 5. Evaluate
     final = compute_final_metrics(probe_net, features, labels)
-    print(f"\nResults:")
+    print("\nResults:")
     print(f"  AUROC: {final['auroc']:.4f}")
     print(f"  ECE:   {final['ece']:.4f}")
     print(f"  Best val AUROC: {max(metrics['val_auroc']):.4f}")

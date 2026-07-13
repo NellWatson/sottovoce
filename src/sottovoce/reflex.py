@@ -10,7 +10,8 @@ Reflex arc: inference-time uncertainty-aware generation via logit adjustment.
     where the model is already predisposed to hedge and the adjuster provides
     a modest additional push (-17.6pp confident-wrong on Qwen 2.5 0.5B).
 
-    For all other models, use SelfCorrector (CW 62.7% -> 9.3%, 85% reduction).
+    For all other models, use SelfCorrector (reduction scales with probe
+    precision; ~10% CW reduction reproduced with a standard MLP probe).
 
 Wraps a language model with a CalibrationProbe and a learned LogitAdjuster.
 The probe reads residual stream activations (detached, no gradient) and scores
@@ -21,7 +22,7 @@ when it doesn't know, while leaving confident predictions largely untouched.
 The base model is frozen throughout. The probe never receives gradient. Only
 the adjuster's small MLP is trainable, and it modifies output logits alone.
 
-Watson, N. (forthcoming). "The Model Already Knows: Cross-Architecture
+Watson, N. (in preparation). "The Model Already Knows: Cross-Architecture
 Uncertainty Signals in Language Model Residual Streams."
 """
 
@@ -29,7 +30,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -111,12 +111,12 @@ class ReflexArc:
         model: nn.Module,
         tokenizer,
         probe: CalibrationProbe,
-        adjuster_path: Optional[Union[str, Path]] = None,
+        adjuster_path: str | Path | None = None,
     ):
         self.model = model
         self.tokenizer = tokenizer
         self.probe = probe
-        self._captured_activation: Optional[torch.Tensor] = None
+        self._captured_activation: torch.Tensor | None = None
 
         vocab_size = model.config.vocab_size
         self.adjuster = LogitAdjuster(vocab_size=vocab_size)
@@ -124,7 +124,7 @@ class ReflexArc:
         if adjuster_path is not None:
             self.load_adjuster(adjuster_path)
 
-        self._hedge_token_ids: Optional[set[int]] = None
+        self._hedge_token_ids: set[int] | None = None
 
     @property
     def hedge_token_ids(self) -> set[int]:
@@ -205,7 +205,7 @@ class ReflexArc:
                     activation = self._captured_activation
                     if activation is None:
                         raise RuntimeError(
-                            "Hook failed to capture activation at step %d" % step
+                            f"Hook failed to capture activation at step {step}"
                         )
 
                     # Project if cross-architecture transfer is active.
@@ -437,14 +437,14 @@ class ReflexArc:
         generated_ids = output[0][input_ids.shape[1]:]
         return self.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
 
-    def save_adjuster(self, path: Union[str, Path]) -> None:
+    def save_adjuster(self, path: str | Path) -> None:
         """Save adjuster weights to a .pt file."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(self.adjuster.state_dict(), str(path))
         logger.info(f"Saved adjuster to {path}")
 
-    def load_adjuster(self, path: Union[str, Path]) -> None:
+    def load_adjuster(self, path: str | Path) -> None:
         """
         Load pre-trained adjuster weights from a .pt file.
 

@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use sottovoce, please cite the software and the accompanying paper."
+title: "sottovoce: residual-stream confabulation detection and self-correction"
+abstract: >-
+  A lightweight probe that reads a language model's residual stream to detect
+  when it has confabulated, transfers across architectures via a linear
+  projection, and drives a two-pass self-correction loop.
+type: software
+authors:
+  - family-names: Watson
+    given-names: Nell
+  - name: "Claude Commons"
+repository-code: "https://github.com/NellWatson/sottovoce"
+license: MIT
+version: 0.3.0
+keywords:
+  - ai-safety
+  - calibration
+  - confabulation
+  - hallucination
+  - language-models
+  - probes
+  - self-correction
+  - uncertainty
+preferred-citation:
+  type: article
+  title: >-
+    The Model Already Knows: Cross-Architecture Uncertainty Signals in Language
+    Model Residual Streams
+  authors:
+    - family-names: Watson
+      given-names: Nell
+  year: 2026
+  notes: "In preparation"

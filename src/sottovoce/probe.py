@@ -7,7 +7,7 @@ attention mechanism at ~2/3 depth fails to retrieve confident content, the
 skip connection dominates, and the probe reads this dominance as a self-
 knowledge signal. The representation is convergent across model families.
 
-Watson, N. (forthcoming). "The Model Already Knows: Cross-Architecture
+Watson, N. (in preparation). "The Model Already Knows: Cross-Architecture
 Uncertainty Signals in Language Model Residual Streams."
 """
 
@@ -16,7 +16,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Union
 
 import numpy as np
 import torch
@@ -85,7 +84,9 @@ class _JLLogisticNet(nn.Module):
 
         # Fixed random projection (not trainable).
         rng = np.random.RandomState(seed)
-        R_np = rng.randn(k, input_dim).astype(np.float32) / np.sqrt(k)
+        # Divide before casting: float32 / float64-scalar would re-promote to
+        # float64 and break matmul against float32 activations at inference.
+        R_np = (rng.randn(k, input_dim) / np.sqrt(k)).astype(np.float32)
         self.register_buffer("R", torch.from_numpy(R_np))
 
         # Logistic regression (trainable or loaded from sklearn).
@@ -107,7 +108,7 @@ class _JLLogisticNet(nn.Module):
         seed: int,
         coef: np.ndarray,
         intercept: float,
-    ) -> "_JLLogisticNet":
+    ) -> _JLLogisticNet:
         """Load weights from a trained sklearn LogisticRegression."""
         net = cls(input_dim=input_dim, k=k, seed=seed)
         with torch.no_grad():
@@ -123,18 +124,21 @@ class _JLLogisticNet(nn.Module):
         labels: np.ndarray,
         k: int = 64,
         seed: int = 42,
-    ) -> "_JLLogisticNet":
+    ) -> _JLLogisticNet:
         """Train from raw activations and correctness labels."""
         from sklearn.linear_model import LogisticRegression
 
         input_dim = activations.shape[1]
         rng = np.random.RandomState(seed)
-        R = rng.randn(k, input_dim).astype(np.float32) / np.sqrt(k)
-        X_proj = activations @ R.T
+        R = (rng.randn(k, input_dim) / np.sqrt(k)).astype(np.float32)
+        X_proj = (activations.astype(np.float32)) @ R.T
 
-        confab = 1 - labels
+        # Fit to return P(correct), consistent with CalibrationProbe.score's
+        # contract (higher = more likely correct) and the MLP probe path.
+        # Earlier versions fit on (1 - labels), which inverted the routing
+        # polarity of JL probes relative to decide().
         clf = LogisticRegression(max_iter=1000, solver="lbfgs", random_state=seed)
-        clf.fit(X_proj, confab)
+        clf.fit(X_proj, labels)
 
         return cls.from_sklearn(
             input_dim=input_dim,
@@ -159,22 +163,23 @@ class CalibrationProbe:
         decision = probe.decide(score)
     """
 
-    def __init__(self, config: Optional[ProbeConfig] = None):
+    def __init__(self, config: ProbeConfig | None = None):
         self.config = config or ProbeConfig()
         self._probe = _ProbeNet(
             input_dim=self.config.source_dim,
             hidden_dim=self.config.hidden_dim,
             dropout=self.config.dropout,
         )
-        self._projection: Optional[nn.Linear] = None
-        self._captured_activation: Optional[torch.Tensor] = None
+        self._probe.eval()  # deterministic scoring (dropout off) until trained
+        self._projection: nn.Linear | None = None
+        self._captured_activation: torch.Tensor | None = None
 
     @classmethod
     def from_pretrained(
         cls,
-        name_or_path: Union[str, Path],
-        config: Optional[ProbeConfig] = None,
-    ) -> "CalibrationProbe":
+        name_or_path: str | Path,
+        config: ProbeConfig | None = None,
+    ) -> CalibrationProbe:
         """
         Load a pre-trained probe from a .pt file.
 
@@ -185,8 +190,21 @@ class CalibrationProbe:
         instance = cls(config=config)
         path = Path(name_or_path)
 
-        if path.exists() and path.suffix == ".pt":
-            state = torch.load(str(path), map_location="cpu", weights_only=True)
+        if not (path.exists() and path.suffix == ".pt"):
+            raise FileNotFoundError(
+                f"Probe not found at {path}. "
+                "Download pre-trained probes from the sottovoce releases."
+            )
+
+        state = torch.load(str(path), map_location="cpu", weights_only=True)
+        if "logistic.weight" in state:
+            # JL-compressed logistic probe (from from_jl_calibration + save()).
+            input_dim = state["R"].shape[1]
+            k = state["logistic.weight"].shape[1]
+            instance.config.source_dim = input_dim
+            instance._probe = _JLLogisticNet(input_dim=input_dim, k=k)
+        else:
+            # Standard 2-layer MLP probe.
             input_dim = state["net.0.weight"].shape[1]
             instance.config.source_dim = input_dim
             instance._probe = _ProbeNet(
@@ -194,17 +212,12 @@ class CalibrationProbe:
                 hidden_dim=instance.config.hidden_dim,
                 dropout=instance.config.dropout,
             )
-            instance._probe.load_state_dict(state)
-        else:
-            raise FileNotFoundError(
-                f"Probe not found at {path}. "
-                "Download pre-trained probes from the sottovoce releases."
-            )
+        instance._probe.load_state_dict(state)
 
         instance._probe.eval()
         return instance
 
-    def load_projection(self, path: Union[str, Path]) -> None:
+    def load_projection(self, path: str | Path) -> None:
         """
         Load a linear projection for cross-model transfer.
 
@@ -272,7 +285,7 @@ class CalibrationProbe:
         model: nn.Module,
         tokenizer,
         text: str,
-        probe_layer: Optional[int] = None,
+        probe_layer: int | None = None,
     ) -> float:
         """
         Score a text input for confidence.
@@ -322,9 +335,9 @@ class CalibrationProbe:
     def decide(
         self,
         score: float,
-        threshold_pass: Optional[float] = None,
-        threshold_hedge: Optional[float] = None,
-        threshold_gate: Optional[float] = None,
+        threshold_pass: float | None = None,
+        threshold_hedge: float | None = None,
+        threshold_gate: float | None = None,
     ) -> ProbeDecision:
         """
         Make a routing decision based on the probe score.
@@ -356,7 +369,7 @@ class CalibrationProbe:
         model: nn.Module,
         tokenizer,
         texts: list[str],
-        probe_layer: Optional[int] = None,
+        probe_layer: int | None = None,
     ) -> np.ndarray:
         """
         Extract residual stream features for a list of texts.
@@ -396,11 +409,11 @@ class CalibrationProbe:
 
         return np.stack(features)
 
-    def save(self, path: Union[str, Path]) -> None:
+    def save(self, path: str | Path) -> None:
         """Save probe weights to a .pt file."""
         torch.save(self._probe.state_dict(), str(path))
 
-    def save_projection(self, path: Union[str, Path]) -> None:
+    def save_projection(self, path: str | Path) -> None:
         """Save projection weights to a .pt file."""
         if self._projection is None:
             raise ValueError("No projection to save")
@@ -413,8 +426,8 @@ class CalibrationProbe:
         labels: np.ndarray,
         k: int = 64,
         seed: int = 42,
-        config: Optional[ProbeConfig] = None,
-    ) -> "CalibrationProbe":
+        config: ProbeConfig | None = None,
+    ) -> CalibrationProbe:
         """Create a Tier 1 JL-compressed logistic probe from calibration data.
 
         The probe uses a fixed random projection (JL lemma) followed by
