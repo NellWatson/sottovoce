@@ -40,9 +40,9 @@ A single lightweight probe, trained once, detects when a language model has give
 
 | Metric | Value |
 |--------|-------|
-| Residual-stream probe AUROC (held-out TriviaQA, MLP) | 0.84 (0.78 on independent replication) |
-| **Output entropy, zero training (same model + task)** | **0.841** |
-| Gold-token output logit (same model + task) | 0.848 |
+| Residual-stream probe AUROC (out-of-fold CV; 0.79–0.85 across prompt formats) | **0.84** |
+| Output entropy, zero training (few-shot format; **0.37–0.82** across formats) | 0.82 |
+| Gold-token logprob, showing the signal is in the output distribution | 0.886 |
 | Probe AUROC (cross-validated, generation-time) | 0.77 |
 | Probe AUROC (cross-validated, input-time / pre-generation) | 0.64–0.67 |
 | Attention-pattern probe (control) | 0.46 (below chance) |
@@ -94,16 +94,25 @@ One forward pass, one vector, one score per response. No token-by-token averagin
 
 The probe reads uncertainty as the *negative space of certainty*: when the attention mechanism fails to retrieve confident content, the skip connection dominates, and the probe detects this dominance as a self-knowledge signal.
 
-### Try output entropy before you train a probe
+### Probe or output entropy? It depends on your prompt format
 
-**Read this before adopting the probe.** Token-level output entropy — the Shannon entropy of the next-token softmax, one line of code, zero training — predicts correctness at **AUROC 0.841** on the same model and task where this probe scores 0.836 (and 0.78 on our own independent replication). The gold-token output logit reaches 0.848. It is framing-invariant (±0.017) where a linear probe is not (±0.156), and it needs **no cross-model projection**: it scores 0.83–0.92 natively on Llama, Mistral and Gemma, where this probe's *transferred* score on Llama 3.1 8B is 0.753.
+Output entropy (the Shannon entropy of the next-token softmax) is one line of code and needs no training, so it deserves to be your first question, not an afterthought. We ran the head-to-head that settles it: **500 TriviaQA questions, Qwen 2.5 3B Instruct, every signal computed from the same forward pass**, the probe scored with honest 5-fold out-of-fold cross-validation.
 
-So: if you need same-model confabulation detection, **compute the entropy first.** It is cheaper, needs no training, and is at least as accurate.
+| Prompt format | Model commits to its answer at the 1st token | Output entropy (zero training) | This probe (trained) |
+|---|:--:|:--:|:--:|
+| Few-shot / completion | 44.6% | **0.821** | 0.793 |
+| Raw instruction | 7.0% | 0.604 | 0.826 |
+| Chat template | 3.0% | **0.365** (worse than chance) | **0.854** |
 
-Reach for a trained probe only when you need something entropy does not give you:
-- **Resistance to context injection.** Output entropy is gameable: adversarial context shifts ~96% of wrong answers into its confident tier. (The probe has not been tested on this axis either — it is an open question, not a probe win.)
-- **A mechanistic handle** on *where* in the network the signal lives, or a signal you can transfer and study.
-- **Composition.** Multi-signal stacks beat any single signal, entropy included.
+**Output entropy is free and just as accurate as this probe — but only when your prompt makes the model commit to its answer at the first generated token.** Under few-shot prompting the two are statistically tied (difference +0.027, 95% CI [−0.015, +0.070]). If that is your setup, **compute the entropy first**: it costs one line and no training.
+
+Under a chat template the model spends its first token on preamble ("The…", a newline) rather than the answer, so first-token entropy measures *formatting* rather than knowledge, and it inverts to **worse than chance**. The probe is unaffected.
+
+**Output entropy swings 0.46 AUROC across prompt formats. This probe swings 0.06.** Robustness to how you prompt, not accuracy, is what a trained probe actually buys you. Most deployments are chat-style, which usually makes that the decisive consideration.
+
+The uncertainty is genuinely present in the output distribution: the gold-token logprob reaches 0.886. The signal is not missing from the output. It reaches the logits and dies at the argmax.
+
+Reach for the probe when you use chat-style prompts; when you need resistance to context injection (output entropy is gameable — adversarial context pushes ~96% of wrong answers into its confident tier, and the probe is untested on this axis); or when you want a signal you can transfer across models and study.
 
 Attention patterns carry essentially no uncertainty signal (AUROC ≈0.46–0.50, at or below chance); adding attention-derived features degrades the residual probe.
 

@@ -7,7 +7,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
-- **Output entropy is now reported as the primary baseline, and it wins.** The
+- **Corrected: "compute the entropy first" was wrong as blanket advice.** A previous
+  entry in this release told users output entropy is "cheaper, needs no training, and
+  is at least as accurate," so they should prefer it. We then ran the head-to-head that
+  should have preceded that claim (500 TriviaQA items, Qwen 2.5 3B Instruct, all signals
+  from the same forward pass, probe scored with honest 5-fold out-of-fold CV). The result
+  is conditional, and the condition matters:
+
+  | Prompt format | Model commits at 1st token | Output entropy | Probe |
+  |---|:--:|:--:|:--:|
+  | Few-shot | 44.6% | **0.821** | 0.793 |
+  | Raw instruction | 7.0% | 0.604 | 0.826 |
+  | Chat template | 3.0% | **0.365** (worse than chance) | **0.854** |
+
+  Output entropy ties the probe (+0.027, CI [−0.015, +0.070]) **only** when the prompt makes
+  the model commit to its answer at the first generated token. Under a chat template the
+  model emits preamble instead, so first-token entropy measures formatting rather than
+  knowledge and inverts to worse than chance. **Entropy swings 0.46 AUROC across formats;
+  the probe swings 0.06.** Since most deployments are chat-style, the earlier advice would
+  have steered users to an anti-predictive signal. The README now states the condition.
+  What a trained probe buys is robustness to prompt format, not accuracy.
+
+- **The output distribution does carry the signal** (gold-token logprob 0.886), so the
+  claim that the uncertainty "never reaches the output" remains false. It reaches the
+  logits and dies at the argmax.
   README previously said the uncertainty signal "never reaches the output." That
   is false. Shannon entropy of the next-token softmax — one line, zero training —
   scores AUROC 0.841 on the same model and task where this probe scores 0.836
