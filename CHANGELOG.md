@@ -29,21 +29,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   What a trained probe buys is robustness to prompt format, not accuracy.
 
 - **The output distribution does carry the signal** (gold-token logprob 0.886), so the
-  claim that the uncertainty "never reaches the output" remains false. It reaches the
-  logits and dies at the argmax.
-  README previously said the uncertainty signal "never reaches the output." That
-  is false. Shannon entropy of the next-token softmax — one line, zero training —
-  scores AUROC 0.841 on the same model and task where this probe scores 0.836
-  (0.78 on independent replication), and the gold-token output logit scores 0.848.
-  Output entropy is also framing-invariant (±0.017 vs the probe's ±0.156) and
-  needs no cross-model projection (0.83–0.92 natively on Llama/Mistral/Gemma,
-  where this probe's *transferred* Llama-8B score is 0.753). The README now tells
-  users to **try output entropy before training a probe**, and reserves the probe
-  for what entropy does not offer (adversarial-injection resistance is untested
-  for both; mechanistic study; multi-signal composition). The interoceptive
-  deficit is correspondingly reframed: the signal reaches the logits and dies at
-  the **argmax**, not before the output. The deficit is in expression, not
-  representation.
+  earlier claim that the uncertainty "never reaches the output" was false and has been
+  removed. It reaches the logits and dies at the **argmax**. The interoceptive deficit is
+  reframed accordingly: it is a deficit of **expression, not of representation**.
+- **Probe AUROC restated from measurement.** An earlier note in this release claimed
+  input-time probes "top out around 0.64–0.67." That was inherited from a single prior run
+  and is **wrong**: measured with honest 5-fold out-of-fold CV on 500 items, the probe scores
+  **0.793–0.863** depending on prompt format. The probe is stronger and far more
+  format-stable than that note implied.
 - **Documentation now matches the validated experimental record.** Earlier
   releases headlined a single-run probe AUROC of 0.989 (CUDA bf16) and an "85%
   reduction," and stated that CUDA bf16 was mandatory. Follow-up experiments
@@ -61,6 +54,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   experiment logs.
 
 ### Added
+- **`EntropyGate` — a zero-training, pluggable alternative to the probe.** The measurements
+  showed output entropy *ties* the trained probe when the prompt makes the model answer
+  immediately (0.821 vs 0.793), so the honest thing is to ship both and let users choose
+  rather than to sell one. Any object with `score()` and `decide()` now satisfies the new
+  `Gate` protocol, and `SelfCorrector` accepts either. `EntropyGate` measures entropy across
+  the **answer tokens**, not the first generated token: that distinction is the difference
+  between 0.761 and 0.444 under a chat template.
 - `load_base_probe()` — one-line download-and-load for the pre-trained base
   probe shipped with each release. No manual file handling required.
 - New `sottovoce.hub` module centralising release-asset download/caching.

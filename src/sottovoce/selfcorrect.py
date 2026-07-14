@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 
-from sottovoce.probe import CalibrationProbe, ProbeDecision
+from sottovoce.probe import Gate, ProbeDecision
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +131,16 @@ class SelfCorrector:
         self,
         model: nn.Module,
         tokenizer,
-        probe: CalibrationProbe,
+        probe: Gate,
         config: SelfCorrectorConfig | None = None,
     ):
+        """
+        Args:
+            probe: Any gate exposing ``score(model, tokenizer, text)`` and ``decide(score)``.
+                Pass a :class:`~sottovoce.CalibrationProbe` (trained; wins under chat-style
+                prompts) or an :class:`~sottovoce.EntropyGate` (zero training; ties the probe
+                when the prompt makes the model answer immediately). See the README table.
+        """
         self.model = model
         self.tokenizer = tokenizer
         self.probe = probe

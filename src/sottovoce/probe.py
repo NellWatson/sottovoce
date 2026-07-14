@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 import torch
@@ -28,6 +29,32 @@ class ProbeDecision(Enum):
     HEDGE = "hedge"         # Moderate confidence: add uncertainty marker
     GATE = "gate"           # Low confidence: block or retry
     ESCALATE = "escalate"   # Very low confidence: escalate to human/better model
+
+
+@runtime_checkable
+class Gate(Protocol):
+    """
+    Anything that can score a response and route on that score.
+
+    Two implementations ship with sottovoce, and which one you want depends on how you
+    prompt (see the README):
+
+    * :class:`CalibrationProbe` -- trained on the residual stream. Wins under chat-style
+      prompts (0.863 vs 0.761) and is largely insensitive to prompt format.
+    * :class:`~sottovoce.EntropyGate` -- zero training, reads the output distribution.
+      Ties the probe when the prompt makes the model answer immediately (0.821 vs 0.793),
+      but collapses under a chat template if read at the first token.
+
+    Implement these two methods and :class:`~sottovoce.SelfCorrector` will accept it.
+    """
+
+    def score(self, model: nn.Module, tokenizer, text: str) -> float:
+        """Return confidence in [0, 1]; higher means more likely correct."""
+        ...
+
+    def decide(self, score: float) -> ProbeDecision:
+        """Route the score to a PASS / HEDGE / GATE / ESCALATE decision."""
+        ...
 
 
 @dataclass

@@ -29,15 +29,17 @@ Uncertainty Signals in Language Model Residual Streams."
 """
 
 from sottovoce.alignment import load_alignment_set
+from sottovoce.entropy import EntropyGate
 from sottovoce.hub import load_base_probe
 from sottovoce.plucker import PluckerProbe
-from sottovoce.probe import CalibrationProbe, ProbeConfig, ProbeDecision
+from sottovoce.probe import CalibrationProbe, Gate, ProbeConfig, ProbeDecision
 from sottovoce.reflex import LogitAdjuster, ReflexArc
 from sottovoce.selfcorrect import SelfCorrectionResult, SelfCorrector, SelfCorrectorConfig
 
 __version__ = "0.3.0"
 __all__ = [
-    "CalibrationProbe", "ProbeConfig", "ProbeDecision",
+    "CalibrationProbe", "ProbeConfig", "ProbeDecision", "Gate",
+    "EntropyGate",
     "load_base_probe", "load_alignment_set",
     "SelfCorrector", "SelfCorrectionResult", "SelfCorrectorConfig",
     "ReflexArc", "LogitAdjuster",

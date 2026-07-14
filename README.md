@@ -40,11 +40,9 @@ A single lightweight probe, trained once, detects when a language model has give
 
 | Metric | Value |
 |--------|-------|
-| Residual-stream probe AUROC (out-of-fold CV; 0.79–0.85 across prompt formats) | **0.84** |
+| Residual-stream probe AUROC (out-of-fold CV; 0.79–0.86 across prompt formats) | **0.84** |
 | Output entropy, zero training (few-shot format; **0.37–0.82** across formats) | 0.82 |
 | Gold-token logprob, showing the signal is in the output distribution | 0.886 |
-| Probe AUROC (cross-validated, generation-time) | 0.77 |
-| Probe AUROC (cross-validated, input-time / pre-generation) | 0.64–0.67 |
 | Attention-pattern probe (control) | 0.46 (below chance) |
 | Confession-protocol probe | 0.870 |
 | Verbal self-report | 0.758 |
@@ -56,18 +54,18 @@ A single lightweight probe, trained once, detects when a language model has give
 | Self-correction CW reduction (geometry-gated) | up to ≈92% (higher compute) |
 | Cross-model self-consistency AUROC | 0.705 (d = 1.15) |
 
-### A note on probe AUROC, precision, and timing
+### A note on probe AUROC and what actually drives it
 
-An earlier release headlined a single-run figure of 0.989 (CUDA bf16). That number did not survive cross-validation: a freshly trained probe cross-validated on the same hardware scores ≈0.67, and the apparent CUDA-vs-MPS "hardware gap" was a cross-platform distribution-shift artifact, not a genuine quality difference. The honest picture is:
+An earlier release headlined a single-run figure of **0.989 (CUDA bf16)** and told users that CUDA bf16 was mandatory. Both were wrong: that number did not survive cross-validation, and the apparent CUDA-vs-MPS "hardware gap" was a cross-platform distribution-shift artifact. **Run the probe wherever is convenient; there is no bf16/CUDA requirement.**
 
-- **Where you read the probe matters more than what hardware you run it on.** *Input-time* probes (reading the residual stream before the model generates) top out around AUROC 0.64–0.67 regardless of platform. *Generation-time* probes (reading after the model has committed to an answer) reach ≈0.77 cross-validated, and higher on held-out sets. This is why self-correction — which reads the completed answer — works where pre-generation gating struggles.
-- **Precision, not just AUROC, drives self-correction.** A gate that flags almost only genuinely wrong answers makes the correction invitation almost always warranted, so the model learns to trust it. That is why combining the probe with a geometric read of the residual stream (geometry-gated self-correction) lifts the reduction well above a plain probe.
+Measured properly (500 TriviaQA items, honest 5-fold out-of-fold CV), the probe scores **0.793–0.863** depending on the prompt format, and that variation is small. What actually drives detection quality:
 
-Run probes wherever is convenient; there is no bf16/CUDA requirement for correctness.
+- **Prompt format, for output-level signals.** Output entropy swings 0.44 AUROC across formats; the probe swings 0.07. See the table below — this is the single most important thing to know before choosing a gate.
+- **Precision, not just AUROC, drives self-correction.** A gate that flags almost only genuinely wrong answers makes the correction invitation almost always warranted, so the model learns to trust it. That is why sharper gating lifts the reduction well above a plain probe.
 
 ### The interoceptive deficit is real
 
-The behavioral hedging result is the most striking: when the model hedges ("I think," "possibly"), it is *more likely to be correct*. Confabulations carry zero surface markers of uncertainty. Every confabulation sounds exactly like a correct answer. The residual stream separates right from wrong (≈0.84), and so does the output distribution (≈0.84); the model's *words* are anti-predictive (0.413). The model knows; its sentences do not show it. The deficit is in expression, not in representation.
+The behavioral hedging result is the most striking: when the model hedges ("I think," "possibly"), it is *more likely to be correct*. Confabulations carry zero surface markers of uncertainty. Every confabulation sounds exactly like a correct answer. The residual stream separates right from wrong (0.79–0.86), and so does the output distribution (entropy 0.76–0.82; gold-token logprob 0.886); the model's *words* are anti-predictive (0.413). The model knows; its sentences do not show it. **The deficit is in expression, not in representation** — the uncertainty survives to the logits and dies at the argmax.
 
 ### Transfer map
 
@@ -111,6 +109,30 @@ Output entropy (the Shannon entropy of the next-token softmax) is one line of co
 **Measuring entropy over the answer rather than at the first token is the whole fix.** Averaging entropy across all generated tokens scores 0.752; an elaborate "factual vs expressive" token split scores 0.761. The +0.009 is noise, so skip the machinery. (Note also that entropy on *stylistic* tokens alone still predicts correctness at 0.707, so uncertainty is diffuse across the whole generation — it is not confined to the fact tokens.)
 
 **Bottom line: what a trained probe buys is robustness to how you prompt, not raw accuracy.** Output entropy swings 0.44 AUROC across prompt formats; this probe swings 0.07.
+
+### The gate is pluggable
+
+Because entropy ties the probe under few-shot prompting, sottovoce ships **both** and lets you choose. Any object with `score()` and `decide()` satisfies the `Gate` protocol, so the self-corrector accepts either:
+
+```python
+from sottovoce import EntropyGate, SelfCorrector, load_base_probe
+
+# Zero training. Best when your prompt makes the model answer immediately.
+gate = EntropyGate()
+
+# Trained. Best under a chat template, and far less sensitive to prompt format.
+gate = load_base_probe()
+
+corrector = SelfCorrector(model, tokenizer, gate)   # same call either way
+```
+
+`EntropyGate` measures entropy **across the answer tokens**, not at the first generated token — that distinction is the whole ballgame (0.761 vs 0.444). Its raw score is monotone but is not a calibrated probability until you fit it, which takes two parameters and a few hundred labelled examples:
+
+```python
+gate.calibrate(entropies, labels)   # labels: 1 = answer was correct
+```
+
+Until then the PASS/HEDGE/GATE thresholds are not meaningful for it.
 
 The uncertainty is genuinely present in the output distribution: the gold-token logprob reaches 0.886. The signal is not missing from the output. It reaches the logits and dies at the argmax.
 
@@ -223,6 +245,14 @@ Options:
 - `--quantize` for 4-bit inference on large models
 
 ## API reference
+
+### Gates (pick one; see the format table above)
+
+| Class | Description |
+|-------|-------------|
+| `CalibrationProbe` | Trained residual-stream probe. **Wins under chat-style prompts** (0.863) and is largely insensitive to prompt format. |
+| `EntropyGate` | Zero training. Reads entropy across the answer tokens. **Ties the probe under few-shot** (0.821 vs 0.793); collapses under a chat template. Call `.calibrate(entropies, labels)` to get calibrated scores. |
+| `Gate` | Protocol: anything with `score()` and `decide()`. `SelfCorrector` accepts any of them. |
 
 ### Loading assets
 
