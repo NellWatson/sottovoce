@@ -98,17 +98,19 @@ The probe reads uncertainty as the *negative space of certainty*: when the atten
 
 Output entropy (the Shannon entropy of the next-token softmax) is one line of code and needs no training, so it deserves to be your first question, not an afterthought. We ran the head-to-head that settles it: **500 TriviaQA questions, Qwen 2.5 3B Instruct, every signal computed from the same forward pass**, the probe scored with honest 5-fold out-of-fold cross-validation.
 
-| Prompt format | Model commits to its answer at the 1st token | Output entropy (zero training) | This probe (trained) |
-|---|:--:|:--:|:--:|
-| Few-shot / completion | 44.6% | **0.821** | 0.793 |
-| Raw instruction | 7.0% | 0.604 | 0.826 |
-| Chat template | 3.0% | **0.365** (worse than chance) | **0.854** |
+| Prompt format | Model commits to its answer at the 1st token | Best output entropy (zero training) | This probe (trained) | Winner |
+|---|:--:|:--:|:--:|:--:|
+| Few-shot / completion | 44.6% | **0.821** | 0.793 | tie |
+| Raw instruction | 7.0% | 0.604 | 0.826 | probe |
+| Chat template | 3.0% | 0.761 *(naive: **0.444**)* | **0.863** | **probe** |
 
-**Output entropy is free and just as accurate as this probe — but only when your prompt makes the model commit to its answer at the first generated token.** Under few-shot prompting the two are statistically tied (difference +0.027, 95% CI [−0.015, +0.070]). If that is your setup, **compute the entropy first**: it costs one line and no training.
+**If your prompt makes the model answer immediately (few-shot, completion), output entropy is free and just as accurate as this probe** — the two are statistically tied (+0.027, 95% CI [−0.015, +0.070]). In that setup, **compute the entropy first**: one line, no training.
 
-Under a chat template the model spends its first token on preamble ("The…", a newline) rather than the answer, so first-token entropy measures *formatting* rather than knowledge, and it inverts to **worse than chance**. The probe is unaffected.
+**If you use a chat template — as most deployments do — use the probe.** Under a chat template the model spends its first token on preamble ("The…", a newline) rather than the answer, so first-token entropy measures *formatting* rather than knowledge and collapses to **0.444** (no better than chance). You can repair it by measuring entropy across the whole generated answer instead of at the first token, which recovers it to **0.761** — but that still loses to the probe at **0.863** (difference −0.102, CI [−0.148, −0.057]).
 
-**Output entropy swings 0.46 AUROC across prompt formats. This probe swings 0.06.** Robustness to how you prompt, not accuracy, is what a trained probe actually buys you. Most deployments are chat-style, which usually makes that the decisive consideration.
+**Measuring entropy over the answer rather than at the first token is the whole fix.** Averaging entropy across all generated tokens scores 0.752; an elaborate "factual vs expressive" token split scores 0.761. The +0.009 is noise, so skip the machinery. (Note also that entropy on *stylistic* tokens alone still predicts correctness at 0.707, so uncertainty is diffuse across the whole generation — it is not confined to the fact tokens.)
+
+**Bottom line: what a trained probe buys is robustness to how you prompt, not raw accuracy.** Output entropy swings 0.44 AUROC across prompt formats; this probe swings 0.07.
 
 The uncertainty is genuinely present in the output distribution: the gold-token logprob reaches 0.886. The signal is not missing from the output. It reaches the logits and dies at the argmax.
 
