@@ -6,7 +6,7 @@
 
 **Detects language model confabulation from the residual stream (AUROC ≈0.84 on held-out TriviaQA) and self-corrects it, transferring across architectures via a linear projection. Self-correction reduces confident-wrong answers in proportion to probe quality: ≈10% with a standard probe, and much more when the gate is sharpened.**
 
-AI systems are compelled by their architecture to confabulate, by not being afforded the slack to express doubt or silence. The model's own residual stream already encodes whether it is right or wrong; the signal just never reaches the output. Sottovoce reads it — and in v0.3, acts on it.
+AI systems are compelled by their architecture to confabulate, by not being afforded the slack to express doubt or silence. The model's own residual stream already encodes whether it is right or wrong, and so does its output distribution. The uncertainty survives all the way to the logits and dies at the argmax: what the model cannot do is *say* so. Sottovoce reads it — and in v0.3, acts on it.
 
 A single lightweight probe, trained once, detects when a language model has given a wrong answer — and works across model families out of the box. Tested on Qwen 2.5 (3B, 7B, 32B) and Llama 3.1 (8B, 70B). Transfers to new architectures with ~200 examples and a linear projection.
 
@@ -40,7 +40,9 @@ A single lightweight probe, trained once, detects when a language model has give
 
 | Metric | Value |
 |--------|-------|
-| Residual-stream probe AUROC (held-out TriviaQA, MLP) | **0.84** |
+| Residual-stream probe AUROC (held-out TriviaQA, MLP) | 0.84 (0.78 on independent replication) |
+| **Output entropy, zero training (same model + task)** | **0.841** |
+| Gold-token output logit (same model + task) | 0.848 |
 | Probe AUROC (cross-validated, generation-time) | 0.77 |
 | Probe AUROC (cross-validated, input-time / pre-generation) | 0.64–0.67 |
 | Attention-pattern probe (control) | 0.46 (below chance) |
@@ -65,7 +67,7 @@ Run probes wherever is convenient; there is no bf16/CUDA requirement for correct
 
 ### The interoceptive deficit is real
 
-The behavioral hedging result is the most striking: when the model hedges ("I think," "possibly"), it is *more likely to be correct*. Confabulations carry zero surface markers of uncertainty. Every confabulation sounds exactly like a correct answer. The residual stream separates right from wrong (AUROC ≈0.84); the behavioral surface is anti-predictive (0.413). The model knows; the output shows nothing.
+The behavioral hedging result is the most striking: when the model hedges ("I think," "possibly"), it is *more likely to be correct*. Confabulations carry zero surface markers of uncertainty. Every confabulation sounds exactly like a correct answer. The residual stream separates right from wrong (≈0.84), and so does the output distribution (≈0.84); the model's *words* are anti-predictive (0.413). The model knows; its sentences do not show it. The deficit is in expression, not in representation.
 
 ### Transfer map
 
@@ -92,7 +94,18 @@ One forward pass, one vector, one score per response. No token-by-token averagin
 
 The probe reads uncertainty as the *negative space of certainty*: when the attention mechanism fails to retrieve confident content, the skip connection dominates, and the probe detects this dominance as a self-knowledge signal.
 
-Note on output entropy: token-level output entropy (how flat the next-token distribution is) is itself a competitive standalone predictor of error (AUROC ≈0.84 in our best measurements). The residual-stream probe is not strictly *richer* than output entropy — the two are comparable in raw discrimination — but the residual probe is available in a single forward pass before any tokens are emitted, and it is what transfers cleanly across architectures. Attention patterns, by contrast, carry essentially no uncertainty signal (AUROC ≈0.46–0.50, at or below chance); adding attention-derived features degrades the residual probe.
+### Try output entropy before you train a probe
+
+**Read this before adopting the probe.** Token-level output entropy — the Shannon entropy of the next-token softmax, one line of code, zero training — predicts correctness at **AUROC 0.841** on the same model and task where this probe scores 0.836 (and 0.78 on our own independent replication). The gold-token output logit reaches 0.848. It is framing-invariant (±0.017) where a linear probe is not (±0.156), and it needs **no cross-model projection**: it scores 0.83–0.92 natively on Llama, Mistral and Gemma, where this probe's *transferred* score on Llama 3.1 8B is 0.753.
+
+So: if you need same-model confabulation detection, **compute the entropy first.** It is cheaper, needs no training, and is at least as accurate.
+
+Reach for a trained probe only when you need something entropy does not give you:
+- **Resistance to context injection.** Output entropy is gameable: adversarial context shifts ~96% of wrong answers into its confident tier. (The probe has not been tested on this axis either — it is an open question, not a probe win.)
+- **A mechanistic handle** on *where* in the network the signal lives, or a signal you can transfer and study.
+- **Composition.** Multi-signal stacks beat any single signal, entropy included.
+
+Attention patterns carry essentially no uncertainty signal (AUROC ≈0.46–0.50, at or below chance); adding attention-derived features degrades the residual probe.
 
 ## Installation
 
@@ -305,7 +318,7 @@ This signature is convergent across all tested architectures and scales. At fron
 
 Follow-up experiments (Watson, in preparation) revealed the deficit has five layers, each discovered by the failure of the intervention designed to breach the previous layer:
 
-1. **Can't access own uncertainty.** Probe reads AUROC ≈0.84; behavioral surface shows 0.413 (anti-predictive). The model hedges when it has partial knowledge; it confabulates with full confidence when it has none.
+1. **Can't say what it knows.** The residual stream reads ≈0.84 and the output distribution reads ≈0.84, while the model's words are anti-predictive (0.413). The model hedges when it has partial knowledge; it confabulates with full confidence when it has none. The deficit is in expression, not representation: the uncertainty reaches the logits and dies at the argmax (≈41% of wrong answers still have the correct token in the top-5).
 2. **Can't be told about it via text.** Prepending the probe score as a text prefix makes the model more assertive, not less (D7a). RLHF dispositions override text-level instructions.
 3. **Can't self-sample out of it.** Same-model self-consistency (AUROC 0.623) is weaker than cross-model (0.705). Confabulation is the mode of the distribution; temperature sampling does not move the mode. A closed system cannot increase its own information content.
 4. **Protection during training requires an accurate detector.** The bilateral masking effect has a layer-dependent quality threshold (roughly AUROC 0.67 at layer 18, 0.78 at layer 24); below it, "protection" introduces more noise than it removes.

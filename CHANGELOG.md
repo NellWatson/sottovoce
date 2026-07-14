@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **Output entropy is now reported as the primary baseline, and it wins.** The
+  README previously said the uncertainty signal "never reaches the output." That
+  is false. Shannon entropy of the next-token softmax — one line, zero training —
+  scores AUROC 0.841 on the same model and task where this probe scores 0.836
+  (0.78 on independent replication), and the gold-token output logit scores 0.848.
+  Output entropy is also framing-invariant (±0.017 vs the probe's ±0.156) and
+  needs no cross-model projection (0.83–0.92 natively on Llama/Mistral/Gemma,
+  where this probe's *transferred* Llama-8B score is 0.753). The README now tells
+  users to **try output entropy before training a probe**, and reserves the probe
+  for what entropy does not offer (adversarial-injection resistance is untested
+  for both; mechanistic study; multi-signal composition). The interoceptive
+  deficit is correspondingly reframed: the signal reaches the logits and dies at
+  the **argmax**, not before the output. The deficit is in expression, not
+  representation.
 - **Documentation now matches the validated experimental record.** Earlier
   releases headlined a single-run probe AUROC of 0.989 (CUDA bf16) and an "85%
   reduction," and stated that CUDA bf16 was mandatory. Follow-up experiments
