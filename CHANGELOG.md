@@ -6,7 +6,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`EntropyGate(first_token_only=True)`** — read entropy at the first answer token instead
+  of averaging across the answer. Use it for few-shot / completion prompts, where the model
+  commits at that token (44.6%) and averaging *dilutes* the signal (0.821 → 0.707). The
+  default stays answer-averaged, which is correct for chat templates, where the first token
+  is preamble and reading it alone is worse than chance (0.380 → 0.696 aggregated). The rule
+  is: **read where the model commits.**
+
 ### Changed
+- **Corrected: the headline AUROC described a probe this package does not ship.** The
+  previously advertised 0.84 (and "the probe swings only 0.07 across prompt formats") came
+  from an **input-time** probe reading the last *prompt* token. Sottovoce scores the model's
+  *completed answer* — a **generation-time** probe. Measured across all three formats
+  (`research/results/probe_timing_format_sweep/`, 500 TriviaQA, honest 5-fold OOF CV):
+
+  | Probe timing | few-shot | raw | chat | swing |
+  |---|:--:|:--:|:--:|:--:|
+  | **generation-time (ships)** | **0.616** | 0.767 | **0.852** | **0.236** |
+  | input-time (research only) | 0.793 | 0.804 | 0.836 | **0.043** |
+
+  Consequences, all now reflected in the README: the shipped probe is **not** format-robust;
+  under **few-shot it loses decisively to free first-token entropy** (0.616 vs 0.821), so use
+  `EntropyGate(first_token_only=True)` there; under **chat it wins clearly** (0.852 vs 0.696),
+  which is most deployments. Shipping an input-time probe is under consideration — it ties
+  under chat, is far better under few-shot, needs one fewer forward pass, and can gate before
+  generation — but it is *worse under adversarial injection*, so it is a trade-off, not a
+  free win. It also requires retraining the released `.pt` on prompt-only features.
+- **Adversarial robustness: measured, no longer an open question — and the answer is mixed.**
+  Under per-question misleading-context injection (chat, 500 items): **both entropy measures
+  collapse to chance** (first-token 0.446, aggregated 0.455, CIs spanning 0.50 — no usable
+  signal), while **the probe degrades but survives** (0.852 → 0.657) and flags 12–25pp fewer
+  wrong answers as confident (all CIs excluding zero). That is the strongest argument for the
+  trained probe. **But it is a mitigation, not a defence:** 70% of wrong answers under attack
+  still read as confident (entropy: 89–95%). Do not deploy either as a security control.
+- **Corrected: self-correction's size tracks how *often* the gate fires, not its precision.**
+  The README previously said the reduction scales with gate precision and that "sharper
+  gating" pushes it higher. Its own source (AQ15) shows the opposite: correcting everything
+  gave 96.2%, a gate firing on 88% of items gave 92.4% (its 88% rate is an acknowledged
+  *calibration mismatch*, i.e. overfiring, not sharpness), and the most selective gate — 2.7%
+  trigger — gave 2%. Also now stated plainly: **the mechanism is hedging, not correction.**
+  Of 51 wrong→hedge flips in that battery, **zero were wrong→correct**, at a −2.7pp accuracy
+  cost. Self-correction makes the model honest about what it does not know; it does not make
+  it know.
 - **Corrected: "compute the entropy first" was wrong as blanket advice.** A previous
   entry in this release told users output entropy is "cheaper, needs no training, and
   is at least as accurate," so they should prefer it. We then ran the head-to-head that

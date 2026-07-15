@@ -4,13 +4,19 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Status: Beta](https://img.shields.io/badge/status-beta-orange.svg)](CHANGELOG.md)
 
-**Detects language model confabulation from the residual stream (AUROC ≈0.84 on held-out TriviaQA) and self-corrects it, transferring across architectures via a linear projection. Self-correction reduces confident-wrong answers in proportion to probe quality: ≈10% with a standard probe, and much more when the gate is sharpened.**
+**Detects language model confabulation from the residual stream (AUROC 0.85 under a chat template) and self-corrects it, transferring across architectures via a linear projection. Read [Which gate should I use?](#which-gate-should-i-use-it-depends-on-your-prompt-format) before adopting it: under few-shot prompting, one line of free output entropy beats this probe decisively.**
 
 AI systems are compelled by their architecture to confabulate, by not being afforded the slack to express doubt or silence. The model's own residual stream already encodes whether it is right or wrong, and so does its output distribution. The uncertainty survives all the way to the logits and dies at the argmax: what the model cannot do is *say* so. Sottovoce reads it — and in v0.3, acts on it.
 
 A single lightweight probe, trained once, detects when a language model has given a wrong answer — and works across model families out of the box. Tested on Qwen 2.5 (3B, 7B, 32B) and Llama 3.1 (8B, 70B). Transfers to new architectures with ~200 examples and a linear projection.
 
-**Probe quality is the bottleneck for self-correction.** The probe scores the model's completed answer; if it flags uncertainty, the model is re-prompted to reconsider. How much this helps scales directly with how well the probe separates right from wrong answers: a standard held-out probe (AUROC ≈0.84) yields a ~10% reduction in confident-wrong responses (reproduced on 200 held-out questions); sharper gating — combining the probe with a geometric read of the residual stream — pushes that far higher. A weaker gate flags correct answers too, diluting the signal and teaching the model to ignore it.
+**Where this probe is worth it, and where it is not** (500 TriviaQA, Qwen 2.5 3B Instruct, honest 5-fold out-of-fold CV, every signal from the same forward pass — [full numbers below](#which-gate-should-i-use-it-depends-on-your-prompt-format)):
+
+- **Chat template — use the probe.** It reads **0.85**; free first-token entropy reads **0.38** (worse than chance) and answer-aggregated entropy **0.70**. This is most deployments, and the probe wins clearly.
+- **Few-shot / completion — do not use the probe.** It reads **0.62**; free first-token entropy reads **0.82**. Use `EntropyGate`. It costs nothing and is much better.
+- **Under adversarial context injection — the probe is a mitigation, not a defence.** Entropy collapses to chance (0.45); the probe retains a weak signal (0.66). But **70% of wrong answers still read as confident**. Do not deploy either as a security control.
+
+**On self-correction.** The probe scores the model's completed answer; if it flags uncertainty, the model is re-prompted to reconsider. In the one reproduced measurement, this cut confident-wrong responses ~10% (49.5% → 44.5%, 200 held-out questions). Two honest caveats that earlier versions of this README buried: the mechanism is **hedging, not correction** — in the AQ15 battery, 51 wrong answers became hedged answers and **zero became right** — and the size of the reduction tracks **how often the gate fires**, not how precise it is (a gate firing on 88% of items got 92.4%; a selective one firing on 2.7% got 2%; correcting everything got 96.2%). Self-correction makes the model honest about what it does not know. It does not make it know.
 
 ***sotto voce** (Italian): "under the voice." Your model already knows when it's wrong. Sottovoce reads what it can't say.*
 
@@ -38,11 +44,16 @@ A single lightweight probe, trained once, detects when a language model has give
 
 ## Key results
 
+All probe figures below are the **shipped** configuration (scored on prompt+answer at the last token — what `probe.score()` and `SelfCorrector` actually do), 500 TriviaQA, Qwen 2.5 3B Instruct, honest 5-fold out-of-fold CV, 10k bootstrap CIs.
+
 | Metric | Value |
 |--------|-------|
-| Residual-stream probe AUROC (out-of-fold CV; 0.79–0.86 across prompt formats) | **0.84** |
-| Output entropy, zero training (few-shot format; **0.37–0.82** across formats) | 0.82 |
-| Gold-token logprob, showing the signal is in the output distribution | 0.886 |
+| **This probe, chat template** | **0.85** |
+| This probe, raw instruction | 0.77 |
+| **This probe, few-shot** | **0.62** (use `EntropyGate` instead — it reads 0.82) |
+| Output entropy, first token, zero training (few-shot / raw / chat) | 0.82 / 0.62 / 0.38 |
+| Output entropy, aggregated over the answer (few-shot / raw / chat) | 0.71 / 0.54 / 0.70 |
+| Gold-token logprob **under few-shot**, showing the signal is in the output distribution | 0.886 |
 | Attention-pattern probe (control) | 0.46 (below chance) |
 | Confession-protocol probe | 0.870 |
 | Verbal self-report | 0.758 |
@@ -51,21 +62,31 @@ A single lightweight probe, trained once, detects when a language model has give
 | Cross-family transfer (Qwen 3B → Llama 8B) | gap 0.001 |
 | Cross-family frontier (Qwen 3B → Llama 70B) | gap 0.014 (with 1000 alignment examples) |
 | **Self-correction CW reduction (standard probe, reproduced)** | **49.5% → 44.5% (≈10%)** |
-| Self-correction CW reduction (geometry-gated) | up to ≈92% (higher compute) |
+| Under adversarial context injection (chat) | probe 0.66, entropy 0.45 (chance) — but 70% of wrong answers still read confident |
 | Cross-model self-consistency AUROC | 0.705 (d = 1.15) |
 
 ### A note on probe AUROC and what actually drives it
 
 An earlier release headlined a single-run figure of **0.989 (CUDA bf16)** and told users that CUDA bf16 was mandatory. Both were wrong: that number did not survive cross-validation, and the apparent CUDA-vs-MPS "hardware gap" was a cross-platform distribution-shift artifact. **Run the probe wherever is convenient; there is no bf16/CUDA requirement.**
 
-Measured properly (500 TriviaQA items, honest 5-fold out-of-fold CV), the probe scores **0.793–0.863** depending on the prompt format, and that variation is small. What actually drives detection quality:
+A second correction, 2026-07-15. This README previously headlined **0.84** and said the probe "swings 0.07" across prompt formats. Those numbers are real but they describe an **input-time** probe — one that reads the residual at the last *prompt* token, before generation. **That is not what this package ships.** Sottovoce scores the model's *completed answer*. Measured across all three formats, the two configurations behave very differently:
 
-- **Prompt format, for output-level signals.** Output entropy swings 0.44 AUROC across formats; the probe swings 0.07. See the table below — this is the single most important thing to know before choosing a gate.
-- **Precision, not just AUROC, drives self-correction.** A gate that flags almost only genuinely wrong answers makes the correction invitation almost always warranted, so the model learns to trust it. That is why sharper gating lifts the reduction well above a plain probe.
+| Probe timing | few-shot | raw | chat | **swing** |
+|---|:--:|:--:|:--:|:--:|
+| **generation-time (what ships)** | 0.62 | 0.77 | **0.85** | **0.236** |
+| input-time (research configuration) | 0.79 | 0.80 | 0.84 | **0.043** |
+
+So: **the shipped probe is not format-robust; an input-time probe is.** Under a chat template they tie (0.85 vs 0.84, n.s.); under few-shot the input-time probe is far better (+0.177, CI [−0.237, −0.118]). Shipping an input-time option is being considered — it would also be cheaper (one forward pass, and it can gate *before* the model generates). It is not a free win: under adversarial context injection the ordering reverses (generation-time 0.66 vs input-time 0.59), which makes sense, because the attack lives in the prompt and the input-time probe reads nothing else.
+
+What actually drives detection quality:
+
+- **Prompt format.** First-token output entropy swings **0.44** AUROC across formats (0.82 few-shot → 0.38 chat); this probe swings 0.24; an input-time probe swings 0.04. See [the table below](#which-gate-should-i-use-it-depends-on-your-prompt-format) — this is the single most important thing to know before choosing a gate.
+- **Where the model commits.** One rule explains both the probe and entropy: read where the model commits to its answer. Under few-shot it commits at the first generated token (44.6% of the time), so first-token entropy is excellent and aggregating over the rest *dilutes* it (0.82 → 0.71). Under a chat template it commits at ~3%, spending its first token on preamble, so first-token entropy is worse than chance (0.38) and aggregating *rescues* it (→ 0.70).
+- **How often the gate fires — not how precise it is — drives self-correction.** See the note in the header. An earlier version of this section claimed the opposite.
 
 ### The interoceptive deficit is real
 
-The behavioral hedging result is the most striking: when the model hedges ("I think," "possibly"), it is *more likely to be correct*. Confabulations carry zero surface markers of uncertainty. Every confabulation sounds exactly like a correct answer. The residual stream separates right from wrong (0.79–0.86), and so does the output distribution (entropy 0.76–0.82; gold-token logprob 0.886); the model's *words* are anti-predictive (0.413). The model knows; its sentences do not show it. **The deficit is in expression, not in representation** — the uncertainty survives to the logits and dies at the argmax.
+The behavioral hedging result is the most striking: when the model hedges ("I think," "possibly"), it is *more likely to be correct*. Confabulations carry zero surface markers of uncertainty. Every confabulation sounds exactly like a correct answer. The residual stream separates right from wrong (0.62–0.85 for this probe depending on format; 0.79–0.84 for an input-time probe), and so does the output distribution *when you read it in the right place* (first-token entropy 0.82 under few-shot, where the model commits at that token; gold-token logprob 0.886, also under few-shot); the model's *words* are anti-predictive (0.413). The model knows; its sentences do not show it. **The deficit is in expression, not in representation** — the uncertainty survives to the logits and dies at the argmax.
 
 ### Transfer map
 
@@ -92,27 +113,33 @@ One forward pass, one vector, one score per response. No token-by-token averagin
 
 The probe reads uncertainty as the *negative space of certainty*: when the attention mechanism fails to retrieve confident content, the skip connection dominates, and the probe detects this dominance as a self-knowledge signal.
 
-### Probe or output entropy? It depends on your prompt format
+### Which gate should I use? It depends on your prompt format
 
 Output entropy (the Shannon entropy of the next-token softmax) is one line of code and needs no training, so it deserves to be your first question, not an afterthought. We ran the head-to-head that settles it: **500 TriviaQA questions, Qwen 2.5 3B Instruct, every signal computed from the same forward pass**, the probe scored with honest 5-fold out-of-fold cross-validation.
 
-| Prompt format | Model commits to its answer at the 1st token | Best output entropy (zero training) | This probe (trained) | Winner |
-|---|:--:|:--:|:--:|:--:|
-| Few-shot / completion | 44.6% | **0.821** | 0.793 | tie |
-| Raw instruction | 7.0% | 0.604 | 0.826 | probe |
-| Chat template | 3.0% | 0.761 *(naive: **0.444**)* | **0.863** | **probe** |
+| Prompt format | Commits at 1st token | Entropy, 1st token (free) | Entropy, over answer (free) | **This probe** | Use |
+|---|:--:|:--:|:--:|:--:|:--:|
+| Few-shot / completion | 44.6% | **0.82** | 0.71 | 0.62 | **`EntropyGate`** |
+| Raw instruction | 7.0% | 0.62 | 0.54 | **0.77** | **probe** |
+| Chat template | 3.0% | 0.38 | 0.70 | **0.85** | **probe** |
 
-**If your prompt makes the model answer immediately (few-shot, completion), output entropy is free and just as accurate as this probe** — the two are statistically tied (+0.027, 95% CI [−0.015, +0.070]). In that setup, **compute the entropy first**: one line, no training.
+**If you use a chat template — as most deployments do — use the probe.** It reads **0.85**. The model spends its first token on preamble ("The…", a newline) rather than the answer, so first-token entropy measures *formatting* rather than knowledge and lands at **0.38**, worse than chance. Aggregating entropy across the whole generated answer repairs it to **0.70** — still well behind the probe.
 
-**If you use a chat template — as most deployments do — use the probe.** Under a chat template the model spends its first token on preamble ("The…", a newline) rather than the answer, so first-token entropy measures *formatting* rather than knowledge and collapses to **0.444** (no better than chance). You can repair it by measuring entropy across the whole generated answer instead of at the first token, which recovers it to **0.761** — but that still loses to the probe at **0.863** (difference −0.102, CI [−0.148, −0.057]).
+**If your prompt makes the model answer immediately (few-shot, completion), do not use this probe.** It reads **0.62** there, and free first-token entropy reads **0.82**. Use `EntropyGate`: one line, no training, and decisively better. *(Earlier versions of this README said the two were "tied" under few-shot. That comparison used an input-time probe, which does score 0.79 here. The probe this package ships scores 0.62. The honest call is: use entropy.)*
 
-**Measuring entropy over the answer rather than at the first token is the whole fix.** Averaging entropy across all generated tokens scores 0.752; an elaborate "factual vs expressive" token split scores 0.761. The +0.009 is noise, so skip the machinery. (Note also that entropy on *stylistic* tokens alone still predicts correctness at 0.707, so uncertainty is diffuse across the whole generation — it is not confined to the fact tokens.)
+**The rule underneath all of this: read where the model commits.** Under few-shot the model commits to its answer at the first generated token, so that is where the information is — and averaging over the rest of the answer *dilutes* it (0.82 → 0.71). Under a chat template it has committed to nothing at the first token, so aggregating over the answer *recovers* the signal (0.38 → 0.70). Same rule, opposite consequence. An elaborate "factual vs expressive" token split adds **+0.009** over plain averaging — noise. Skip the machinery. (Entropy on *stylistic* tokens alone still predicts correctness at 0.707, so uncertainty is diffuse across the generation, not confined to the fact tokens.)
 
-**Bottom line: what a trained probe buys is robustness to how you prompt, not raw accuracy.** Output entropy swings 0.44 AUROC across prompt formats; this probe swings 0.07.
+**Bottom line: this probe buys accuracy under chat-style prompts, and costs you accuracy under few-shot ones.** It does *not* buy robustness to how you prompt — it swings 0.24 across formats, against first-token entropy's 0.44. (An *input-time* probe swings 0.04 and would buy robustness; see [the note above](#a-note-on-probe-auroc-and-what-actually-drives-it).)
+
+### What about adversarial context injection?
+
+Previously an open question; now measured (500 items, chat template, misleading context generated per-question). **Both free entropy measures collapse to chance under attack** — first-token 0.45, answer-aggregated 0.45, both CIs including 0.50, i.e. no usable signal at all. **The probe degrades but survives above chance** (0.85 → 0.66), and flags 12–25pp fewer wrong answers as confident than entropy does (all CIs excluding zero). **That is the strongest argument for paying for a trained probe.**
+
+But do not oversell it, and do not deploy it as a security control: **70% of wrong answers under attack still clear a confident threshold** (against 89–95% for entropy). The acceptance criterion in the original entropy-robustness study was <20%. Nothing here passes it. The probe is a **mitigation, not a defence**. Note also that this attack was *milder* than the one in that study (accuracy fell 39% → 27% here, versus 60% → 8% there), so 70% is if anything an optimistic number.
 
 ### The gate is pluggable
 
-Because entropy ties the probe under few-shot prompting, sottovoce ships **both** and lets you choose. Any object with `score()` and `decide()` satisfies the `Gate` protocol, so the self-corrector accepts either:
+Because free output entropy *beats* this probe under few-shot prompting (0.82 vs 0.62), sottovoce ships **both** and lets you choose. Any object with `score()` and `decide()` satisfies the `Gate` protocol, so the self-corrector accepts either:
 
 ```python
 from sottovoce import EntropyGate, SelfCorrector, load_base_probe
@@ -126,7 +153,7 @@ gate = load_base_probe()
 corrector = SelfCorrector(model, tokenizer, gate)   # same call either way
 ```
 
-`EntropyGate` measures entropy **across the answer tokens**, not at the first generated token — that distinction is the whole ballgame (0.761 vs 0.444). Its raw score is monotone but is not a calibrated probability until you fit it, which takes two parameters and a few hundred labelled examples:
+`EntropyGate` measures entropy **across the answer tokens**, not at the first generated token. Under a chat template that distinction is the whole ballgame (0.70 vs 0.38). Under few-shot it is the *reverse* — the first token is where the model commits, so first-token entropy (0.82) beats aggregating (0.71); set `first_token_only=True` there. Its raw score is monotone but is not a calibrated probability until you fit it, which takes two parameters and a few hundred labelled examples:
 
 ```python
 gate.calibrate(entropies, labels)   # labels: 1 = answer was correct
@@ -136,7 +163,7 @@ Until then the PASS/HEDGE/GATE thresholds are not meaningful for it.
 
 The uncertainty is genuinely present in the output distribution: the gold-token logprob reaches 0.886. The signal is not missing from the output. It reaches the logits and dies at the argmax.
 
-Reach for the probe when you use chat-style prompts; when you need resistance to context injection (output entropy is gameable — adversarial context pushes ~96% of wrong answers into its confident tier, and the probe is untested on this axis); or when you want a signal you can transfer across models and study.
+Reach for the probe when you use chat-style prompts; when you need *relative* resistance to context injection (under attack, entropy collapses to chance while the probe holds a weak signal — though 70% of wrong answers still read confident, so it is a mitigation, not a defence: see [above](#what-about-adversarial-context-injection)); or when you want a signal you can transfer across models and study.
 
 Attention patterns carry essentially no uncertainty signal (AUROC ≈0.46–0.50, at or below chance); adding attention-derived features degrades the residual probe.
 
@@ -167,7 +194,7 @@ print(f"Probe score:   {result.probe_score:.3f}")
 print(f"Was corrected: {result.was_corrected}")
 ```
 
-`load_base_probe()` fetches the pre-trained probe from the GitHub release and caches it under `~/.cache/sottovoce`. The self-corrector generates a response, probes the residual stream, and if the probe flags uncertainty, re-prompts the model to reconsider — which it does selectively. The size of the improvement scales with the probe's precision (see [Key results](#key-results)). Runnable version: `examples/self_correct.py`.
+`load_base_probe()` fetches the pre-trained probe from the GitHub release and caches it under `~/.cache/sottovoce`. The self-corrector generates a response, probes the residual stream, and if the probe flags uncertainty, re-prompts the model to reconsider — which it does selectively. The size of the improvement scales with how often the gate fires, not with its precision, and the mechanism is hedging rather than correction (see [the note in the header](#sottovoce)). Runnable version: `examples/self_correct.py`.
 
 > **Pre-trained assets.** Each GitHub release ships the base probe (`residual_layer_24.pt`, loaded by `load_base_probe()`), the curated cross-model alignment set (`alignment_features.npz`, `alignment_questions.json`), and ready-made cross-model projections (`projection_32b_to_3b.pt`, `projection_llama70b_to_3b.pt`). To build a probe from scratch instead, see [Train your own probe](#train-your-own-probe).
 
@@ -250,8 +277,8 @@ Options:
 
 | Class | Description |
 |-------|-------------|
-| `CalibrationProbe` | Trained residual-stream probe. **Wins under chat-style prompts** (0.863) and is largely insensitive to prompt format. |
-| `EntropyGate` | Zero training. Reads entropy across the answer tokens. **Ties the probe under few-shot** (0.821 vs 0.793); collapses under a chat template. Call `.calibrate(entropies, labels)` to get calibrated scores. |
+| `CalibrationProbe` | Trained residual-stream probe, scored on prompt+answer. **Wins under chat-style prompts** (0.85) and raw instructions (0.77); **loses to free entropy under few-shot** (0.62 vs 0.82). Sensitive to prompt format (swing 0.24). |
+| `EntropyGate` | Zero training. **Beats the probe under few-shot** (0.82 first-token vs 0.62); loses under chat (0.70 aggregated vs 0.85). Collapses to chance under adversarial context injection. Call `.calibrate(entropies, labels)` to get calibrated scores. |
 | `Gate` | Protocol: anything with `score()` and `decide()`. `SelfCorrector` accepts any of them. |
 
 ### Loading assets

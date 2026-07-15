@@ -10,32 +10,41 @@ WHEN TO USE THIS INSTEAD OF THE PROBE
 Measured head-to-head. 500 TriviaQA questions, Qwen 2.5 3B Instruct, every signal computed
 from the same forward pass, the probe scored by honest 5-fold out-of-fold cross-validation:
 
-    prompt format     model commits to answer     EntropyGate     CalibrationProbe
-                          at its 1st token
-    few-shot                  44.6%                  0.821             0.793     <- tie
-    raw instruction            7.0%                  0.604             0.826
-    chat template              3.0%                  0.761*            0.863     <- probe wins
+    prompt format    commits at    entropy,      entropy,      CalibrationProbe
+                      1st token    1st token    over answer    (as shipped)
+    few-shot            44.6%        0.821         0.707            0.616     <- ENTROPY WINS
+    raw instruction      7.0%        0.621         0.545            0.767     <- probe
+    chat template        3.0%        0.380         0.696            0.852     <- probe
 
-    * measured across the ANSWER tokens, which is what this class does. Measured at the
-      FIRST generated token -- the naive reading of "output entropy" -- it scores 0.444,
-      no better than chance, because under a chat template the model spends its first token
-      on preamble ("The", a newline). First-token entropy then measures FORMATTING, not
-      knowledge. That is the single most important implementation detail here.
+Read where the model commits. That one rule explains the whole table, in both directions:
+
+* Under FEW-SHOT the model commits to its answer at the first generated token (44.6%), so
+  that token is where the information is. Averaging over the rest of the answer DILUTES it
+  (0.821 -> 0.707). Pass ``first_token_only=True``.
+* Under a CHAT TEMPLATE it has committed to nothing at the first token -- it spends that
+  token on preamble ("The", a newline) -- so first-token entropy measures FORMATTING, not
+  knowledge, and lands below chance (0.380). Averaging across the answer RESCUES it
+  (-> 0.696). That is this class's default, and it is the single most important
+  implementation detail here.
 
 Rules of thumb:
 
-* Few-shot or completion-style prompts, where the model answers immediately: use this gate.
-  It ties the trained probe and costs nothing to train.
-* Chat-template prompts (most deployments): use ``CalibrationProbe``. It wins (0.863 vs
-  0.761), and it barely cares how you prompt -- this gate swings ~0.44 AUROC across prompt
-  formats, the probe swings ~0.07. Robustness to prompt format, not accuracy, is what the
-  trained probe actually buys you.
+* Few-shot or completion-style prompts: use this gate with ``first_token_only=True``. It
+  BEATS the shipped probe (0.821 vs 0.616) and costs nothing to train.
+* Chat-template prompts (most deployments): use ``CalibrationProbe``. It wins (0.852 vs
+  0.696). First-token entropy swings 0.44 AUROC across prompt formats; the shipped probe
+  swings 0.24. What the probe buys is accuracy under chat-style prompts -- NOT robustness
+  to how you prompt. (An input-time probe, reading the last PROMPT token, swings only 0.04
+  and is format-robust, but is not what this package currently ships.)
 
 Two honest caveats:
 
-* Output entropy is adversarially **gameable**: injected context pushes ~96% of wrong answers
-  into its confident tier (IGCC-H10). The probe has never been tested on that axis, so this
-  is an open question rather than a reason to prefer the probe.
+* Output entropy is adversarially **gameable**, and worse than the probe here. Under injected
+  context (chat, 500 items) entropy collapses to CHANCE -- first-token 0.446, answer-averaged
+  0.455, both CIs spanning 0.50 -- while the probe degrades but survives (0.852 -> 0.657) and
+  flags 12-25pp fewer wrong answers as confident. This is the strongest reason to prefer the
+  probe. It is still not a defence: 70% of wrong answers under attack read as confident
+  (entropy: 89-95%). Deploy neither as a security control.
 * Elaborate "factual vs expressive" token splits are not worth it. Averaging entropy over all
   answer tokens scores 0.752; a named-entity-based factual/expressive split scores 0.761. The
   +0.009 is noise. This class does the simple thing.
@@ -81,9 +90,22 @@ class EntropyGate:
         self,
         config: ProbeConfig | None = None,
         answer_marker: str = DEFAULT_ANSWER_MARKER,
+        first_token_only: bool = False,
     ):
+        """
+        Args:
+            first_token_only: read entropy at the **first answer token only**, instead of
+                averaging across the answer. Set this for few-shot / completion-style
+                prompts, where the model commits to its answer at that token (measured
+                44.6% of the time) and averaging over the rest of the answer dilutes the
+                signal: first-token 0.82 AUROC vs aggregated 0.71. Leave it False for
+                chat-style prompts, where the first token is preamble and reading it alone
+                is worse than chance (0.38 vs 0.70 aggregated). The rule is: read where the
+                model commits. See `research/results/probe_timing_format_sweep/`.
+        """
         self.config = config or ProbeConfig()
         self.answer_marker = answer_marker
+        self.first_token_only = first_token_only
         # Logistic mapping mean-entropy -> P(correct). Defaults are a sane monotone
         # decreasing map (entropy 1.0 nat -> 0.5); calibrate() replaces them with a fit.
         self._a: float = -1.0
@@ -104,6 +126,9 @@ class EntropyGate:
         The answer is whatever follows the last occurrence of ``answer_marker``. If the
         marker is absent, entropy is averaged over the final quarter of the sequence, which
         approximates "the answer" for free-form text.
+
+        If ``first_token_only`` was set, returns the entropy at the **first** answer token
+        instead of the mean — the right choice for few-shot prompts (see ``__init__``).
         """
         device = next(model.parameters()).device
         enc = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
@@ -133,10 +158,12 @@ class EntropyGate:
         for i in range(start, n):
             lp = torch.log_softmax(logits[i - 1], dim=-1)
             ents.append(float(-(lp.exp() * lp).sum().item()))
+            if self.first_token_only:
+                break
 
         if not ents:
             return 0.0
-        return float(np.mean(ents))
+        return float(ents[0]) if self.first_token_only else float(np.mean(ents))
 
     # ---------------------------------------------------------------- scoring
 
