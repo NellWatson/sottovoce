@@ -22,8 +22,8 @@ when it doesn't know, while leaving confident predictions largely untouched.
 The base model is frozen throughout. The probe never receives gradient. Only
 the adjuster's small MLP is trainable, and it modifies output logits alone.
 
-Watson, N. (in preparation). "The Model Already Knows: Cross-Architecture
-Uncertainty Signals in Language Model Residual Streams."
+Watson, N. (in preparation). "Where the Model Commits: Prompt Format Determines
+Whether a Language Model's Uncertainty Is Legible From Its Output."
 """
 
 from __future__ import annotations

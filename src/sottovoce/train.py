@@ -8,8 +8,8 @@ Usage:
         --n-samples 2000 \
         --output probes/my_probe.pt
 
-Watson, N. (in preparation). "The Model Already Knows: Cross-Architecture
-Uncertainty Signals in Language Model Residual Streams."
+Watson, N. (in preparation). "Where the Model Commits: Prompt Format Determines
+Whether a Language Model's Uncertainty Is Legible From Its Output."
 """
 
 from __future__ import annotations

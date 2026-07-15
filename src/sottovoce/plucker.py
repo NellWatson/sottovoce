@@ -15,8 +15,8 @@ The gain over a direct linear probe comes from the nonlinear MLP over a
     Linear (direct)      AUROC 0.765
     Random (control)     AUROC 0.517
 
-Watson, N. (2026). "The Model Already Knows: Cross-Architecture
-Uncertainty Signals in Language Model Residual Streams."
+Watson, N. (2026). "Where the Model Commits: Prompt Format Determines Whether a
+Language Model's Uncertainty Is Legible From Its Output."
 """
 
 from __future__ import annotations

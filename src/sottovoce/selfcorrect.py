@@ -29,8 +29,8 @@ The key insight: the model responds to probe evidence AFTER generating
 it presents the model with its own completed response alongside uncertainty
 evidence, giving it the agency to revise. This is alignment by invitation.
 
-Watson, N. (2026). "The Model Already Knows: Cross-Architecture
-Uncertainty Signals in Language Model Residual Streams."
+Watson, N. (2026). "Where the Model Commits: Prompt Format Determines Whether a
+Language Model's Uncertainty Is Legible From Its Output."
 """
 
 from __future__ import annotations

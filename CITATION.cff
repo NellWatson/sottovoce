@@ -25,8 +25,7 @@ keywords:
 preferred-citation:
   type: article
   title: >-
-    The Model Already Knows: Cross-Architecture Uncertainty Signals in Language
-    Model Residual Streams
+    Where the Model Commits: Prompt Format Determines Whether a Language Model's Uncertainty Is Legible From Its Output
   authors:
     - family-names: Watson
       given-names: Nell

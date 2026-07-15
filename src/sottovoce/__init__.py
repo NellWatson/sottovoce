@@ -24,8 +24,8 @@ The reflex arc (v0.2) remains available as a prosthetic for sub-1B models
 with bilateral SFT, where logit adjustment still provides modest benefit.
 For all other models, use SelfCorrector.
 
-Watson, N. (2026). "The Model Already Knows: Cross-Architecture
-Uncertainty Signals in Language Model Residual Streams."
+Watson, N. (2026). "Where the Model Commits: Prompt Format Determines Whether a
+Language Model's Uncertainty Is Legible From Its Output."
 """
 
 from sottovoce.alignment import load_alignment_set

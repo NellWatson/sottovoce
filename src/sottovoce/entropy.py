@@ -49,8 +49,8 @@ Two honest caveats:
   answer tokens scores 0.752; a named-entity-based factual/expressive split scores 0.761. The
   +0.009 is noise. This class does the simple thing.
 
-Watson, N. (in preparation). "The Model Already Knows: Cross-Architecture
-Uncertainty Signals in Language Model Residual Streams."
+Watson, N. (in preparation). "Where the Model Commits: Prompt Format Determines
+Whether a Language Model's Uncertainty Is Legible From Its Output."
 """
 
 from __future__ import annotations

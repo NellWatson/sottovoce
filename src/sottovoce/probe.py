@@ -7,8 +7,8 @@ attention mechanism at ~2/3 depth fails to retrieve confident content, the
 skip connection dominates, and the probe reads this dominance as a self-
 knowledge signal. The representation is convergent across model families.
 
-Watson, N. (in preparation). "The Model Already Knows: Cross-Architecture
-Uncertainty Signals in Language Model Residual Streams."
+Watson, N. (in preparation). "Where the Model Commits: Prompt Format Determines
+Whether a Language Model's Uncertainty Is Legible From Its Output."
 """
 
 from __future__ import annotations

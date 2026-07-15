@@ -20,7 +20,7 @@ A single lightweight probe, trained once, detects when a language model has give
 
 ***sotto voce** (Italian): "under the voice." Your model already knows when it's wrong. Sottovoce reads what it can't say.*
 
-> Watson, N. (2026). *"The Model Already Knows: Cross-Architecture Uncertainty Signals in Language Model Residual Streams."* (in preparation)
+> Watson, N. (2026). *"Where the Model Commits: Prompt Format Determines Whether a Language Model's Uncertainty Is Legible From Its Output."* (in preparation)
 
 ## Contents
 
@@ -514,8 +514,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow and [CHANGELOG.md](
 
 ```bibtex
 @article{watson2026model,
-  title={The Model Already Knows: Cross-Architecture Uncertainty Signals in
-         Language Model Residual Streams},
+  title={Where the Model Commits: Prompt Format Determines Whether a Language Model's Uncertainty Is Legible From Its Output},
   author={Watson, Nell},
   year={2026},
   note={In preparation}
