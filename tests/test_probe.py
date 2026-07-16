@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from sottovoce import CalibrationProbe, ProbeDecision
-from sottovoce.hub import BASE_PROBES, load_base_probe
+from sottovoce.hub import BASE_PROBES, INPUT_TIME_PROBES, load_base_probe
 
 
 def _synthetic(n=800, d=2048, seed=0):
@@ -90,3 +90,33 @@ def test_base_probe_registry():
     # Unknown model raises before any network access.
     with pytest.raises(ValueError):
         load_base_probe("nonexistent-model")
+
+
+def test_input_time_registry_and_bad_timing():
+    """Both timings are registered; a bad timing fails before any network access."""
+    assert "qwen2.5-3b" in INPUT_TIME_PROBES
+    assert INPUT_TIME_PROBES["qwen2.5-3b"] != BASE_PROBES["qwen2.5-3b"]
+    with pytest.raises(ValueError, match="timing"):
+        load_base_probe(timing="halfway")
+    with pytest.raises(ValueError):
+        load_base_probe("nonexistent-model", timing="input")
+
+
+def test_probe_defaults_to_generation_timing():
+    """A hand-built or hand-trained probe reads prompt+answer, matching sottovoce.train."""
+    assert CalibrationProbe().timing == "generation"
+
+
+def test_selfcorrector_rejects_an_input_time_probe():
+    """The two-pass loop scores the completed answer; an input-time probe would be
+    scored out of distribution, and that fails quietly. It must raise instead."""
+    from sottovoce import SelfCorrector
+
+    probe = CalibrationProbe()
+    probe.timing = "input"
+    with pytest.raises(ValueError, match="generation-time"):
+        SelfCorrector(model=None, tokenizer=None, probe=probe)
+
+    # The default (generation-time) probe is accepted.
+    ok = CalibrationProbe()
+    assert SelfCorrector(model=None, tokenizer=None, probe=ok).probe is ok

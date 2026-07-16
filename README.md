@@ -13,7 +13,7 @@ A single lightweight probe, trained once, detects when a language model has give
 **Where this probe is worth it, and where it is not** (500 TriviaQA, Qwen 2.5 3B Instruct, honest 5-fold out-of-fold CV, every signal from the same forward pass — [full numbers below](#which-gate-should-i-use-it-depends-on-your-prompt-format)):
 
 - **Chat template — use the probe.** It reads **0.85**; free first-token entropy reads **0.38** (worse than chance) and answer-aggregated entropy **0.70**. This is most deployments, and the probe wins clearly.
-- **Few-shot / completion — do not use the probe.** It reads **0.62**; free first-token entropy reads **0.82**. Use `EntropyGate`. It costs nothing and is much better.
+- **Few-shot / completion — use free entropy, not a probe.** The default probe reads **0.62** and free first-token entropy reads **0.82**. Use `EntropyGate(first_token_only=True)`: it costs nothing and is much better. If you need a probe here anyway, `load_base_probe(timing="input")` reads **0.74**.
 - **Under adversarial context injection — the probe is a mitigation, not a defence.** Entropy collapses to chance (0.45); the probe retains a weak signal (0.66). But **70% of wrong answers still read as confident**. Do not deploy either as a security control.
 
 **On self-correction.** The probe scores the model's completed answer; if it flags uncertainty, the model is re-prompted to reconsider. In the one reproduced measurement, this cut confident-wrong responses ~10% (49.5% → 44.5%, 200 held-out questions). Two honest caveats that earlier versions of this README buried: the mechanism is **hedging, not correction** — in the AQ15 battery, 51 wrong answers became hedged answers and **zero became right** — and the size of the reduction tracks **how often the gate fires**, not how precise it is (a gate firing on 88% of items got 92.4%; a selective one firing on 2.7% got 2%; correcting everything got 96.2%). Self-correction makes the model honest about what it does not know. It does not make it know.
@@ -48,9 +48,9 @@ All probe figures below are the **shipped** configuration (scored on prompt+answ
 
 | Metric | Value |
 |--------|-------|
-| **This probe, chat template** | **0.85** |
-| This probe, raw instruction | 0.77 |
-| **This probe, few-shot** | **0.62** (use `EntropyGate` instead — it reads 0.82) |
+| **Default (generation-time) probe: chat / raw / few-shot** | **0.85** / 0.77 / **0.62** |
+| **Input-time probe** (`timing="input"`): chat / raw / few-shot | 0.82 / 0.80 / **0.74** |
+| Format swing: generation-time vs input-time | **0.236** vs **0.081** |
 | Output entropy, first token, zero training (few-shot / raw / chat) | 0.82 / 0.62 / 0.38 |
 | Output entropy, aggregated over the answer (few-shot / raw / chat) | 0.71 / 0.54 / 0.70 |
 | Gold-token logprob **under few-shot**, showing the signal is in the output distribution | 0.886 |
@@ -73,10 +73,19 @@ A second correction, 2026-07-15. This README previously headlined **0.84** and s
 
 | Probe timing | few-shot | raw | chat | **swing** |
 |---|:--:|:--:|:--:|:--:|
-| **generation-time (what ships)** | 0.62 | 0.77 | **0.85** | **0.236** |
-| input-time (research configuration) | 0.79 | 0.80 | 0.84 | **0.043** |
+| generation-time, `timing="generation"` (default) | 0.62 | 0.77 | **0.85** | **0.236** |
+| **input-time**, `timing="input"` (now shipped) | **0.74** | 0.80 | 0.82 | **0.081** |
 
-So: **the shipped probe is not format-robust; an input-time probe is.** Under a chat template they tie (0.85 vs 0.84, n.s.); under few-shot the input-time probe is far better (+0.177, CI [−0.237, −0.118]). Shipping an input-time option is being considered — it would also be cheaper (one forward pass, and it can gate *before* the model generates). It is not a free win: under adversarial context injection the ordering reverses (generation-time 0.66 vs input-time 0.59), which makes sense, because the attack lives in the prompt and the input-time probe reads nothing else.
+So: **the default probe is not format-robust; the input-time probe is.** Both now ship; pick per deployment:
+
+```python
+gate = load_base_probe()                  # generation-time: score prompt+answer
+gate = load_base_probe(timing="input")    # input-time: score the prompt alone
+```
+
+Under few-shot the input-time probe is far better (0.74 vs 0.62); under chat the default is slightly better (0.85 vs 0.82). Input-time also needs one fewer forward pass and can gate *before* the model generates, so you can abstain or retrieve without paying for the generation. It is not a free win: under adversarial context injection the ordering reverses (generation-time 0.66 vs input-time 0.59), which makes sense, because the attack lives in the prompt and the input-time probe reads nothing else. `SelfCorrector` requires a generation-time gate and raises if handed an input-time one, since its loop scores the completed answer.
+
+**Two honest notes on those numbers.** The input-time row is this **artifact**, measured raw-fed exactly as `score()` runs it. The generation-time row is **method-level**: it fits a `StandardScaler` inside its cross-validation, which `score()` does not do, and that scaling is worth roughly 2 to 6 points. So the generation-time row is, if anything, flattering to the default probe; the input-time probe's advantage under few-shot is likely larger than the table shows. Second, the input-time probe is trained on **all three formats pooled**, and that is load-bearing: a probe trained on a single format does *not* reliably transfer (train on raw, test on few-shot reads **0.597**, barely above chance). If you train your own, train it on every format you serve.
 
 What actually drives detection quality:
 
@@ -277,7 +286,7 @@ Options:
 
 | Class | Description |
 |-------|-------------|
-| `CalibrationProbe` | Trained residual-stream probe, scored on prompt+answer. **Wins under chat-style prompts** (0.85) and raw instructions (0.77); **loses to free entropy under few-shot** (0.62 vs 0.82). Sensitive to prompt format (swing 0.24). |
+| `CalibrationProbe` | Trained residual-stream probe. Two timings: **generation-time** (default; score prompt+answer) wins under chat (0.85) and under attack, but swings 0.24 across formats and loses to free entropy under few-shot (0.62 vs 0.82). **Input-time** (`timing="input"`; score the prompt alone) swings only 0.081, is far better under few-shot (0.74), costs one fewer forward pass, and gates before generation; weaker under attack. |
 | `EntropyGate` | Zero training. **Beats the probe under few-shot** (0.82 first-token vs 0.62); loses under chat (0.70 aggregated vs 0.85). Collapses to chance under adversarial context injection. Call `.calibrate(entropies, labels)` to get calibrated scores. |
 | `Gate` | Protocol: anything with `score()` and `decide()`. `SelfCorrector` accepts any of them. |
 
@@ -285,7 +294,7 @@ Options:
 
 | Function | Description |
 |----------|-------------|
-| `load_base_probe(model="qwen2.5-3b")` | Download and load the pre-trained base probe; returns a ready `CalibrationProbe` |
+| `load_base_probe(model="qwen2.5-3b", timing="generation")` | Download and load a pre-trained base probe. `timing="generation"` (default) scores prompt+answer and is what `SelfCorrector` needs; `timing="input"` scores the prompt alone, before generation. Returns a ready `CalibrationProbe` with `.timing` set. |
 | `load_alignment_set(n=None)` | Download the curated cross-model alignment set (questions + Qwen 3B features) |
 
 ### `SelfCorrector` (v0.3)

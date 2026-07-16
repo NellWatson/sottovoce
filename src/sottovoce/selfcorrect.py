@@ -146,6 +146,22 @@ class SelfCorrector:
         self.probe = probe
         self.config = config or SelfCorrectorConfig()
 
+        # Two-pass self-correction scores the model's COMPLETED answer, so it needs a
+        # generation-time gate. An input-time probe was trained on prompt-only
+        # activations; feeding it prompt+answer is a distribution mismatch that fails
+        # quietly (plausible scores, no error). Catch it here rather than let it ship.
+        if getattr(probe, "timing", "generation") == "input":
+            raise ValueError(
+                "SelfCorrector needs a generation-time gate: it scores the model's "
+                "completed answer, and an input-time probe was trained on the prompt "
+                "alone. Passing it here would silently score out of distribution.\n"
+                "Use load_base_probe(timing='generation') for self-correction, or use "
+                "the input-time probe directly for pre-generation gating:\n"
+                "    probe = load_base_probe(timing='input')\n"
+                "    if probe.decide(probe.score(model, tok, prompt)) is ProbeDecision.GATE:\n"
+                "        ...retrieve or abstain before spending the generation..."
+            )
+
     def generate(self, question: str) -> SelfCorrectionResult:
         """
         Generate a response with self-correction if the probe detects uncertainty.

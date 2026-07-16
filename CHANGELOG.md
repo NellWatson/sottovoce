@@ -7,6 +7,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The input-time probe now ships: `load_base_probe(timing="input")`.** New release asset
+  `residual_layer_24_input_time.pt`. It reads the residual at the last **prompt** token, before
+  generation, so you score the prompt alone. Measured raw-fed exactly as `score()` runs it
+  (500 TriviaQA, Qwen 2.5 3B Instruct, question-grouped 5-fold OOF CV):
+
+  | timing | few-shot | raw | chat | swing |
+  |---|:--:|:--:|:--:|:--:|
+  | generation-time (default) | 0.616 | 0.767 | 0.852 | **0.236** |
+  | input-time (new) | **0.737** | 0.798 | 0.819 | **0.081** |
+
+  Use it when prompt format varies or is few-shot, when you want to gate *before* paying for the
+  generation, or when you want one fewer forward pass. Keep the default under a chat template
+  (0.852 vs 0.819) and under adversarial context injection, where the ordering reverses (0.657 vs
+  0.591) because the attack lives in the prompt and that is all the input-time probe reads. Under
+  few-shot, note that free `EntropyGate(first_token_only=True)` (0.821) still beats both probes.
+
+  Two caveats we would rather state than have you discover. **(1)** The shipped artifact is trained
+  on all three prompt formats **pooled**, and that is load-bearing: a probe trained on a single
+  format does *not* reliably transfer to another (train on raw, test on few-shot reads **0.597**,
+  barely above chance). Pooling removes the dependence on transfer instead of hoping for it, and
+  matches or beats per-format training on every format. If you train your own, train it on every
+  format you serve. **(2)** The generation-time row above is *method-level*: it fits a
+  `StandardScaler` inside its CV, which `score()` does not do, and that scaling is worth roughly 2
+  to 6 points. The input-time row is the artifact itself, raw-fed. So the comparison is, if
+  anything, flattering to the default probe.
+- **`CalibrationProbe.timing`** records which activation a probe was trained to read, and
+  **`SelfCorrector` now raises** if handed an input-time probe. Its two-pass loop scores the
+  model's completed answer, so an input-time probe would be scored out of distribution: a
+  mismatch that returns plausible numbers and fails silently. Better a loud error.
 - **`EntropyGate(first_token_only=True)`** — read entropy at the first answer token instead
   of averaging across the answer. Use it for few-shot / completion prompts, where the model
   commits at that token (44.6%) and averaging *dilutes* the signal (0.821 → 0.707). The

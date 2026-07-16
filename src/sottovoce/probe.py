@@ -200,6 +200,11 @@ class CalibrationProbe:
         self._probe.eval()  # deterministic scoring (dropout off) until trained
         self._projection: nn.Linear | None = None
         self._captured_activation: torch.Tensor | None = None
+        # Which activation this probe was trained to read, and therefore what you
+        # must pass to score(). "generation": prompt + the model's completed answer.
+        # "input": the prompt alone, before generation. load_base_probe() sets this;
+        # a hand-trained probe defaults to "generation", matching sottovoce.train.
+        self.timing: str = "generation"
 
     @classmethod
     def from_pretrained(
