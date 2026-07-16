@@ -34,8 +34,9 @@ Rules of thumb:
 * Chat-template prompts (most deployments): use ``CalibrationProbe``. It wins (0.852 vs
   0.696). First-token entropy swings 0.44 AUROC across prompt formats; the shipped probe
   swings 0.24. What the probe buys is accuracy under chat-style prompts -- NOT robustness
-  to how you prompt. (An input-time probe, reading the last PROMPT token, swings only 0.04
-  and is format-robust, but is not what this package currently ships.)
+  to how you prompt. (An input-time probe, reading the last PROMPT token, is format-robust:
+  0.04 swing method-level, 0.08 as the shipped raw-fed artifact. Since v0.3.1 this package
+  ships one: ``load_base_probe(timing="input")``.)
 
 Two honest caveats:
 
