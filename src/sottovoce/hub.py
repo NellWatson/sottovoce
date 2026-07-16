@@ -27,7 +27,7 @@ CACHE_DIR = Path(os.environ.get(
 ))
 
 RELEASE_URL = (
-    "https://github.com/NellWatson/sottovoce/releases/download/v0.3.0"
+    "https://github.com/NellWatson/sottovoce/releases/download/v0.3.2"
 )
 
 # Pre-trained base probes shipped as release assets, keyed by source model.
@@ -42,25 +42,28 @@ RELEASE_URL = (
 #   input-time       scores the prompt alone, before the model generates.
 #
 # Measured across three prompt formats (500 TriviaQA, Qwen 2.5 3B Instruct,
-# question-grouped 5-fold out-of-fold CV). Two measurement regimes, kept apart
-# because mixing them would flatter the artifacts:
+# question-grouped 5-fold out-of-fold CV). Both shipped probes are trained raw-fed
+# and pooled across all three formats, exactly as score() reads them, and both are
+# verified end-to-end on a held-out 200-item split (indices 500-699):
 #
-#   timing                          few-shot   raw    chat   swing
-#   generation-time  (method*)        0.616   0.767  0.852   0.236
-#   input-time       (method*)        0.793   0.804  0.836   0.043
-#   input-time       (THIS ARTIFACT)  0.737   0.798  0.819   0.081
+#   timing (THIS ARTIFACT, raw-fed)   few-shot   raw    chat   swing
+#   generation-time (default)           0.580   0.756  0.857   0.277   (v0.3.2 retrain)
+#   input-time (timing="input")         0.737   0.798  0.819   0.081
 #
-#   * method-level numbers fit a StandardScaler inside the CV. score() feeds the
-#     RAW activation to the MLP, so a shipped artifact does not get that scaling;
-#     it costs roughly 2 to 6 points. The artifact row is what you actually get.
-#     The generation-time artifact has not been re-measured raw, so its row is
-#     method-level and is, if anything, flattering to it.
+#   held-out deployment (the number you actually get):
+#     generation-time  few-shot 0.53   raw 0.79   chat 0.84  (v12, this reship)
+#     input-time       few-shot 0.74   raw 0.78   chat 0.79  (v8)
 #
-# The ordering survives both regimes: input-time is ~3x more robust to how you
-# prompt (swing 0.081 vs 0.236) and much better under few-shot, while
-# generation-time is better under chat and under adversarial context injection
-# (0.657 vs 0.591), because the attack lives in the prompt and that is all the
-# input-time probe reads. Neither dominates. Pick per deployment.
+# The generation-time default was retrained for v0.3.2 with a documented, committed
+# procedure (research/results/_published/v12_gen_time_probe_reship.json) after the
+# previous, undocumented checkpoint read only 0.74-0.77 on chat in deployment. The
+# new one reproduces its chat table number within CI (held-out 0.837 [0.779,0.890]).
+#
+# The ordering: generation-time is better under chat (0.857 vs 0.819) and under
+# adversarial context injection (0.657 vs 0.591), because the attack lives in the
+# prompt and that is all the input-time probe reads; input-time is ~3x more robust
+# to how you prompt (swing 0.081 vs 0.277) and much better under few-shot. Neither
+# dominates. Pick per deployment.
 #
 # Under few-shot, note that free output entropy (EntropyGate with
 # first_token_only=True, 0.821) still beats BOTH probes. Reach for a probe under

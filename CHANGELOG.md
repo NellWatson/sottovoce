@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-07-16
+
+### Changed
+- **The default (generation-time) probe was retrained and re-shipped with a documented, verified
+  provenance.** The previous `residual_layer_24.pt` predated the measurement programme; its
+  training-item set was undocumented, and its one end-to-end deployment test read only **0.74-0.77
+  on chat** against the 0.85 table number, with the CI excluding 0.85. The replacement is trained
+  raw-fed on all three prompt formats pooled (items 0-499 of the seed-42 TriviaQA `rc.nocontext`
+  shuffle), architecture and RAW-activation contract matching `score()` exactly, and **verified on a
+  held-out 200-item split** (indices 500-699): AUROC **0.837 [0.779, 0.890] on chat** (the 0.852
+  table number is now inside the CI), **0.787 [0.722, 0.847] on raw**, correct polarity in every
+  format. Few-shot stays ~chance (0.53) — use `EntropyGate(first_token_only=True)` there, as before.
+  Procedure and numbers: `research/results/_published/v12_gen_time_probe_reship.json`; training
+  script `modal_train_gen_time_probe.py`.
+- `RELEASE_URL` now points at the **v0.3.2** release, which carries the new default probe alongside
+  the unchanged input-time probe, alignment set, and cross-model projections. Pins to v0.3.0/v0.3.1
+  keep their exact original bytes (the old checkpoint); upgrade to get the verified probe.
+
 ## [0.3.1] - 2026-07-16
 
 ### Verified
