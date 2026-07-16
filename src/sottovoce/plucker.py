@@ -26,9 +26,12 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import roc_auc_score
 
 from sottovoce.probe import CalibrationProbe, ProbeConfig, _ProbeNet
+
+# NOTE: scikit-learn is imported lazily inside fit() (its only use site), so that
+# `import sottovoce` and the inference path (load_base_probe / score) work on a
+# base install of just torch + numpy. sklearn is a [train]/[dev] dependency only.
 
 PLUCKER_DIM = 6
 
@@ -241,6 +244,7 @@ class PluckerProbe(CalibrationProbe):
                 val_labels = y_val.cpu().numpy()
 
             if len(np.unique(val_labels)) > 1:
+                from sklearn.metrics import roc_auc_score
                 auroc = roc_auc_score(val_labels, val_probs)
             else:
                 auroc = 0.0
