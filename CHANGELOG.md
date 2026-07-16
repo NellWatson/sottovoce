@@ -4,7 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.1] - 2026-07-16
+
+### Verified
+- **The released input-time artifact has been verified end-to-end through the public path**
+  (`pip install` from GitHub → `load_base_probe(timing="input")` downloading the release asset →
+  `score()` against a real Qwen 2.5 3B Instruct forward pass) on 200 **held-out** TriviaQA items:
+  AUROC 0.738 / 0.778 / 0.791 (few-shot / raw / chat), each within the claimed number's CI, with
+  well-spread scores and correct polarity in every format. Verification JSON:
+  `research/results/_published/v8_deployment_verification.json` in the research repo.
+- This tag exists chiefly so version pins work: `v0.3.0` was cut before
+  `load_base_probe(timing="input")` landed, so pinning it misses the loader even though the asset
+  hangs on the v0.3.0 release. Pin `v0.3.1` (or later) for the input-time probe.
 
 ### Added
 - **The input-time probe now ships: `load_base_probe(timing="input")`.** New release asset
