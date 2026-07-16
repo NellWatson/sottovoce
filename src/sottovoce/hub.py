@@ -42,27 +42,34 @@ RELEASE_URL = (
 #   input-time       scores the prompt alone, before the model generates.
 #
 # Measured across three prompt formats (500 TriviaQA, Qwen 2.5 3B Instruct,
-# question-grouped 5-fold out-of-fold CV). Both shipped probes are trained raw-fed
-# and pooled across all three formats, exactly as score() reads them, and both are
-# verified end-to-end on a held-out 200-item split (indices 500-699):
+# question-grouped 5-fold out-of-fold CV). These are the same reference numbers as
+# the README table; the generation-time row is method-level and the input-time row
+# is the raw-fed shipped artifact (score() feeds raw activations, so that is what
+# the input-time probe actually gets):
 #
-#   timing (THIS ARTIFACT, raw-fed)   few-shot   raw    chat   swing
-#   generation-time (default)           0.580   0.756  0.857   0.277   (v0.3.2 retrain)
-#   input-time (timing="input")         0.737   0.798  0.819   0.081
+#   timing                            few-shot   raw    chat   swing
+#   generation-time (default)           0.616   0.767  0.852   0.236
+#   input-time (timing="input")         0.737   0.798  0.819   0.081   raw-fed artifact
 #
-#   held-out deployment (the number you actually get):
-#     generation-time  few-shot 0.53   raw 0.79   chat 0.84  (v12, this reship)
-#     input-time       few-shot 0.74   raw 0.78   chat 0.79  (v8)
+# Both shipped probes are verified end-to-end on a held-out 200-item split
+# (indices 500-699) -- the number you actually get from load_base_probe():
+#
+#   held-out deployment               few-shot   raw    chat
+#   generation-time (v0.3.2, v12)        0.53    0.79   0.84
+#   input-time      (v8)                 0.74    0.78   0.79
 #
 # The generation-time default was retrained for v0.3.2 with a documented, committed
 # procedure (research/results/_published/v12_gen_time_probe_reship.json) after the
-# previous, undocumented checkpoint read only 0.74-0.77 on chat in deployment. The
-# new one reproduces its chat table number within CI (held-out 0.837 [0.779,0.890]).
+# previous, undocumented checkpoint read only 0.74-0.77 on chat in deployment; the
+# new one reproduces its chat number within CI (held-out 0.837 [0.779, 0.890]).
+# Re-measuring generation-time raw-fed (v10) also shows it pays no scaler tax --
+# within format it reads 0.612/0.772/0.870 -- so the method-level row above is a
+# fair reflection of the deployed probe, not a flattering one.
 #
-# The ordering: generation-time is better under chat (0.857 vs 0.819) and under
+# The ordering: generation-time is better under chat (0.852 vs 0.819) and under
 # adversarial context injection (0.657 vs 0.591), because the attack lives in the
 # prompt and that is all the input-time probe reads; input-time is ~3x more robust
-# to how you prompt (swing 0.081 vs 0.277) and much better under few-shot. Neither
+# to how you prompt (swing 0.081 vs 0.236) and much better under few-shot. Neither
 # dominates. Pick per deployment.
 #
 # Under few-shot, note that free output entropy (EntropyGate with
